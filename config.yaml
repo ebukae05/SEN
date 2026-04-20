@@ -96,7 +96,7 @@ monitor:
 # ── LLM ───────────────────────────────────────────────────────────────────────
 llm:
   provider: google
-  model: gemini/gemini-2.5-flash
+  model: gemini/gemini-2.5-flash-lite
   temperature: 0.3
 
 # ── API ───────────────────────────────────────────────────────────────────────

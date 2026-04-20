@@ -10,13 +10,12 @@ matplotlib>=3.8.0
 crewai>=0.28.0
 langchain-google-genai>=1.0.0
 
+# Google Gemini API (direct calls for deep analysis + chat)
+google-genai>=1.0.0
+
 # API
 fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
-
-# Dashboard
-dash>=2.16.0
-plotly>=5.20.0
 
 # Reporting
 reportlab>=4.1.0
@@ -24,4 +23,3 @@ reportlab>=4.1.0
 # Utilities
 python-dotenv>=1.0.0
 pyyaml>=6.0.1
-pathlib2>=2.3.7

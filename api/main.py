@@ -2,10 +2,13 @@
 api/main.py — FastAPI REST layer for the SEN maintenance pipeline.
 
 Endpoints:
-    GET  /health              — Liveness check.
-    GET  /engines             — List all engine IDs in the processed dataset.
-    GET  /engine/{id}/status  — RUL prediction + alert status for one engine.
-    POST /analyze             — Run the full 4-agent crew for one engine.
+    GET  /health                  — Liveness check.
+    GET  /engines                 — List all engine IDs in the processed dataset.
+    GET  /engine/{id}/status      — RUL prediction + alert status for one engine.
+    GET  /engine/{id}/sensors     — Normalized sensor history for one engine.
+    POST /analyze                 — Run the full 4-agent crew for one engine.
+    GET  /fleet                   — Health snapshot for all 100 engines.
+    POST /api/chat                — Proxy chat messages to Gemini.
 
 Run with:
     uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
@@ -42,9 +45,11 @@ app = FastAPI(
     version="1.0.0",
 )
 
+_ALLOWED_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -141,16 +146,211 @@ def engine_status(engine_id: int) -> EngineStatus:
 @app.post("/analyze", response_model=AnalyzeResponse)
 def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     """
-    Run the full 4-agent sequential maintenance pipeline for the given engine.
+    Run a direct deep analysis for the given engine.
 
-    Note: This call takes ~2-3 minutes due to LLM rate limiting (5 RPM free tier).
+    Bypasses CrewAI orchestration: runs all diagnostic tools directly,
+    then makes a single Gemini call for the maintenance recommendation.
+    Typically completes in 10-30 seconds instead of 2-3 minutes.
     """
     try:
-        from crews.maintenance_crew import run_pipeline
-        result = run_pipeline(engine_id=request.engine_id)
+        result = _run_direct_analysis(request.engine_id)
         return AnalyzeResponse(engine_id=request.engine_id, result=result)
     except Exception as exc:
-        logger.exception("Pipeline failed for engine %d", request.engine_id)
+        logger.exception("Analysis failed for engine %d", request.engine_id)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+def _run_direct_analysis(engine_id: int) -> str:
+    """
+    Execute the full diagnostic pipeline without CrewAI — direct tool calls only.
+
+    Steps: load data -> predict RUL -> check thresholds -> fleet comparison ->
+    sensor trends -> degradation rate -> time to critical -> Gemini recommendation
+    -> PDF report.
+
+    Parameters
+    ----------
+    engine_id : int
+        The engine unit_id to analyse.
+
+    Returns
+    -------
+    str
+        Formatted analysis report combining all diagnostic results and the
+        Gemini-generated maintenance recommendation.
+    """
+    import pandas as pd
+    from tools.stream_tools import stream_sensors
+    from tools.predict_tools import predict_rul, check_thresholds
+    from tools.diagnostic_tools import compare_to_fleet, sensor_trends, degradation_rate
+    from tools.advisor_tools import time_to_critical, recommend_action, generate_report
+
+    cfg = _load_config()
+    csv_path = _clean_csv_path()
+    if not csv_path.exists():
+        raise FileNotFoundError("Clean dataset not found — run ingest first.")
+
+    df = pd.read_csv(csv_path)
+    if engine_id not in df["unit_id"].values:
+        raise ValueError(f"Engine {engine_id} not found in dataset.")
+
+    # Step 1: RUL prediction via CNN-LSTM at 75% lifecycle mark
+    # (matches the fleet snapshot point so dashboard RUL and analysis RUL agree)
+    logger.info("Direct analysis — engine %d — predicting RUL", engine_id)
+    windows = list(stream_sensors(df, engine_id=engine_id, window_size=cfg["model"]["sequence_length"]))
+    if not windows:
+        raise ValueError(f"Engine {engine_id} has insufficient data for prediction.")
+    window_idx = int(len(windows) * 0.75)
+    rul = predict_rul(windows[window_idx])
+
+    # Step 2: Threshold check
+    alert_info = check_thresholds(engine_id, rul, threshold=cfg["monitor"]["rul_alert_threshold"])
+    severity = alert_info["severity"]
+
+    # Step 3: Fleet comparison
+    logger.info("Direct analysis — engine %d — running diagnostics", engine_id)
+    fleet_result = compare_to_fleet(df, engine_id)
+    outlier_sensors = fleet_result["outlier_sensors"]
+
+    # Step 4: Sensor trend analysis
+    trend_result = sensor_trends(df, engine_id)
+    top_declining = trend_result["ranked_declining"][:3]
+
+    # Step 5: Degradation rate
+    deg_result = degradation_rate(df, engine_id)
+    ratio = deg_result["ratio"]
+    deg_severity = deg_result["severity"]
+
+    # Step 6: Time to critical
+    crit_result = time_to_critical(rul, ratio)
+    urgency = crit_result["urgency"]
+    cycles_to_critical = crit_result["cycles_to_critical"]
+
+    # Step 7: Single Gemini call for recommendation
+    logger.info("Direct analysis — engine %d — requesting Gemini recommendation", engine_id)
+    diagnosis = {
+        "engine_id": engine_id,
+        "rul": round(rul, 2),
+        "severity": severity,
+        "ratio": ratio,
+        "ranked_declining": top_declining,
+        "urgency": urgency,
+    }
+    recommendation = recommend_action(diagnosis)
+
+    # Step 8: PDF report
+    full_diagnosis = {
+        **diagnosis,
+        "cycles_to_critical": cycles_to_critical,
+        "degradation_severity": deg_severity,
+        "outlier_sensors": outlier_sensors,
+    }
+    pdf_path = generate_report(engine_id, full_diagnosis, recommendation)
+    logger.info("Direct analysis — engine %d — complete", engine_id)
+
+    # Format the output
+    report = (
+        f"=== SEN Deep Analysis — Engine {engine_id} ===\n\n"
+        f"PREDICTED RUL: {round(rul, 2)} cycles\n"
+        f"SEVERITY: {severity}\n"
+        f"DEGRADATION RATIO: {ratio}x fleet average ({deg_severity})\n"
+        f"CYCLES TO CRITICAL: {cycles_to_critical}\n"
+        f"URGENCY: {urgency}\n\n"
+        f"FLEET COMPARISON:\n"
+        f"  Outlier sensors: {', '.join(outlier_sensors) if outlier_sensors else 'None'}\n\n"
+        f"TOP DECLINING SENSORS:\n"
+    )
+    for sensor in top_declining:
+        slope = trend_result["slopes"][sensor]
+        label = sensorLabels.get(sensor, sensor)
+        report += f"  {sensor} ({label}): slope = {slope}\n"
+    report += (
+        f"\nMAINTENANCE RECOMMENDATION:\n"
+        f"{recommendation}\n\n"
+        f"PDF Report: {pdf_path.name}\n"
+    )
+    return report
+
+
+# Sensor labels for formatted output
+sensorLabels = {
+    "s2": "Total temp at LPC outlet",
+    "s3": "Total temp at HPC outlet",
+    "s4": "Total temp at LPT outlet",
+    "s7": "Total pressure at HPC outlet",
+    "s8": "Physical fan speed",
+    "s9": "Physical core speed",
+    "s11": "Static pressure at HPC outlet",
+    "s12": "Ratio of fuel flow to Ps30",
+    "s13": "Corrected fan speed",
+    "s14": "Corrected core speed",
+    "s15": "Bypass ratio",
+    "s17": "Bleed enthalpy",
+    "s20": "HPT coolant bleed",
+    "s21": "LPT coolant bleed",
+}
+
+
+# ── Sensor history endpoint ───────────────────────────────────────────────────
+
+SENSOR_COLS = ["s2", "s3", "s4", "s7", "s8", "s9", "s11", "s12", "s13", "s14", "s15", "s17", "s20", "s21"]
+
+
+class SensorReading(BaseModel):
+    """One cycle's worth of normalized sensor values for a single engine."""
+    cycle: int
+    s2: float
+    s3: float
+    s4: float
+    s7: float
+    s8: float
+    s9: float
+    s11: float
+    s12: float
+    s13: float
+    s14: float
+    s15: float
+    s17: float
+    s20: float
+    s21: float
+
+
+@app.get("/engine/{engine_id}/sensors", response_model=list[SensorReading])
+def engine_sensors(engine_id: int, last_n: int = 50) -> list[SensorReading]:
+    """
+    Return the last N cycles of normalized sensor readings for one engine.
+
+    Args:
+        engine_id: Target engine unit ID.
+        last_n:    How many of the most recent cycles to return (default 50).
+    """
+    try:
+        import pandas as pd
+
+        path = _clean_csv_path()
+        if not path.exists():
+            raise HTTPException(status_code=503, detail="Clean dataset not found — run ingest first.")
+
+        df  = pd.read_csv(path)
+        ids = sorted(int(x) for x in df["unit_id"].unique())
+        if engine_id not in ids:
+            raise HTTPException(status_code=404, detail=f"Engine {engine_id} not found.")
+
+        edf = (
+            df[df["unit_id"] == engine_id]
+            .sort_values("cycle")
+            .tail(last_n)
+            .reset_index(drop=True)
+        )
+
+        return [
+            SensorReading(cycle=int(row["cycle"]), **{col: round(float(row[col]), 6) for col in SENSOR_COLS})
+            for _, row in edf.iterrows()
+        ]
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Sensor history failed for engine %d", engine_id)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -240,8 +440,10 @@ def chat(request: ChatRequest) -> ChatResponse:
             for m in request.messages
         )
         full_prompt = f"{request.system_prompt}\n\n{history}\n\nAssistant:"
+        cfg = _load_config()
+        model_name = cfg["llm"]["model"].replace("gemini/", "")
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model=model_name,
             contents=full_prompt,
         )
         return ChatResponse(response=response.text.strip())
