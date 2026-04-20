@@ -158,6 +158,111 @@ def test_check_thresholds() -> bool:
         return False
 
 
+from tools.diagnostic_tools import compare_to_fleet, sensor_trends, degradation_rate
+from tools.advisor_tools import time_to_critical, recommend_action, generate_report
+
+
+def test_compare_to_fleet() -> bool:
+    """Verify compare_to_fleet returns deltas and outlier sensors."""
+    try:
+        df = load_dataset("train")
+        cleaned = clean_data(df)
+        result = compare_to_fleet(cleaned, engine_id=1)
+        assert "deltas" in result
+        assert "outlier_sensors" in result
+        assert result["engine_id"] == 1
+        logger.info("compare_to_fleet: OK — %d outlier sensors", len(result["outlier_sensors"]))
+        return True
+    except Exception as exc:
+        logger.error("compare_to_fleet FAILED: %s", exc)
+        return False
+
+
+def test_sensor_trends() -> bool:
+    """Verify sensor_trends returns slopes and a ranked list."""
+    try:
+        df = load_dataset("train")
+        cleaned = clean_data(df)
+        result = sensor_trends(cleaned, engine_id=1)
+        assert "slopes" in result
+        assert "ranked_declining" in result
+        assert len(result["slopes"]) == 14
+        logger.info("sensor_trends: OK — top decliner: %s", result["ranked_declining"][0])
+        return True
+    except Exception as exc:
+        logger.error("sensor_trends FAILED: %s", exc)
+        return False
+
+
+def test_degradation_rate() -> bool:
+    """Verify degradation_rate returns a ratio and severity label."""
+    try:
+        df = load_dataset("train")
+        cleaned = clean_data(df)
+        result = degradation_rate(cleaned, engine_id=1)
+        assert "ratio" in result
+        assert "severity" in result
+        assert result["severity"] in ("NORMAL", "MODERATE", "HIGH")
+        logger.info("degradation_rate: OK — ratio=%.3f, severity=%s",
+                    result["ratio"], result["severity"])
+        return True
+    except Exception as exc:
+        logger.error("degradation_rate FAILED: %s", exc)
+        return False
+
+
+def test_time_to_critical() -> bool:
+    """Verify time_to_critical returns correct urgency for low RUL."""
+    try:
+        result = time_to_critical(rul=25.0, degradation_rate=1.5)
+        assert "cycles_to_critical" in result
+        assert "urgency" in result
+        assert result["urgency"] in ("IMMEDIATE", "SOON", "SCHEDULED")
+        logger.info("time_to_critical: OK — cycles=%.1f, urgency=%s",
+                    result["cycles_to_critical"], result["urgency"])
+        return True
+    except Exception as exc:
+        logger.error("time_to_critical FAILED: %s", exc)
+        return False
+
+
+def test_recommend_action() -> bool:
+    """Verify recommend_action returns a non-empty string from Gemini."""
+    try:
+        diagnosis = {
+            "engine_id": 1, "rul": 25.0, "severity": "WARNING",
+            "ratio": 1.4, "ranked_declining": ["s14", "s11", "s9"], "urgency": "SOON",
+        }
+        rec = recommend_action(diagnosis)
+        assert isinstance(rec, str) and len(rec) > 10, "Empty recommendation"
+        logger.info("recommend_action: OK — %d chars returned", len(rec))
+        return True
+    except Exception as exc:
+        logger.error("recommend_action FAILED: %s", exc)
+        return False
+
+
+def test_generate_report() -> bool:
+    """Verify generate_report saves a PDF to the reports directory."""
+    try:
+        diagnosis = {
+            "engine_id": 1, "rul": 25.0, "severity": "WARNING",
+            "ratio": 1.4, "urgency": "SOON",
+        }
+        report_path = generate_report(
+            engine_id=1,
+            diagnosis=diagnosis,
+            recommendation="Schedule immediate inspection of HPC blades.",
+        )
+        assert report_path.exists(), f"PDF not found: {report_path}"
+        assert report_path.suffix == ".pdf"
+        logger.info("generate_report: OK — saved to %s", report_path)
+        return True
+    except Exception as exc:
+        logger.error("generate_report FAILED: %s", exc)
+        return False
+
+
 if __name__ == "__main__":
     results = {
         "load_dataset":        test_load_dataset(),
@@ -168,15 +273,21 @@ if __name__ == "__main__":
         "stream_sensors":      test_stream_sensors(),
         "predict_rul":         test_predict_rul(),
         "check_thresholds":    test_check_thresholds(),
+        "compare_to_fleet":    test_compare_to_fleet(),
+        "sensor_trends":       test_sensor_trends(),
+        "degradation_rate":    test_degradation_rate(),
+        "time_to_critical":    test_time_to_critical(),
+        "recommend_action":    test_recommend_action(),
+        "generate_report":     test_generate_report(),
     }
 
     passed = sum(results.values())
     total = len(results)
-    logger.info("Phase 2+4 results: %d/%d passed", passed, total)
+    logger.info("Phase 2+4+5 results: %d/%d passed", passed, total)
 
     if passed < total:
         failed = [k for k, v in results.items() if not v]
         logger.error("Failed: %s", failed)
         sys.exit(1)
 
-    logger.info("Phases 2+4 COMPLETE — all tools verified.")
+    logger.info("Phases 2+4+5 COMPLETE — all tools verified.")
