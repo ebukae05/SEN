@@ -2,8 +2,6 @@
 
 Real-time turbofan engine health monitoring system powered by a 4-agent AI pipeline, CNN-LSTM deep learning, and Gemini AI.
 
-Built as a portfolio project targeting aerospace/defense engineering roles.
-
 ---
 
 ## What It Does
