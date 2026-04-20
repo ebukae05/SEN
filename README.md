@@ -1,0 +1,182 @@
+# SEN — Sensor Engine Network
+
+Real-time turbofan engine health monitoring system powered by a 4-agent AI pipeline, CNN-LSTM deep learning, and Gemini AI.
+
+Built as a portfolio project targeting aerospace/defense engineering roles.
+
+---
+
+## What It Does
+
+SEN ingests NASA CMAPSS FD001 sensor data from 100 turbofan engines, predicts Remaining Useful Life (RUL) using a trained CNN-LSTM model, runs a multi-agent diagnostic pipeline, and delivers maintenance recommendations with generated PDF reports — all surfaced through a REST API and a real-time Dash dashboard.
+
+---
+
+## Architecture
+
+```
+Raw Sensor Data (NASA CMAPSS FD001)
+        │
+        ▼
+┌─────────────────────────────────────────────────────┐
+│              4-Agent Sequential Pipeline             │
+│                                                     │
+│  DataEngineerAgent → MonitorAgent                   │
+│       → DiagnosticAgent → MaintenanceAdvisorAgent   │
+└─────────────────────────────────────────────────────┘
+        │
+        ▼
+  PDF Report + Maintenance Recommendation
+        │
+        ├── FastAPI REST Layer  (port 8000)
+        └── Plotly Dash Dashboard (port 8050)
+```
+
+### CNN-LSTM Model
+
+```
+Input (30 cycles × 14 sensors)
+→ Conv1D(64, kernel=3, ReLU)
+→ Conv1D(64, kernel=3, ReLU)
+→ MaxPooling1D(2)
+→ LSTM(50, return_sequences=True)
+→ Dropout(0.3)
+→ LSTM(50)
+→ Dropout(0.3)
+→ Dense(1) → Predicted RUL
+```
+
+Best validation RMSE: **13.22 cycles** (target: 13–16)
+
+### Agent Pipeline
+
+| Agent | Role | Tools |
+|-------|------|-------|
+| DataEngineerAgent | Ingest, clean, label sensor data | load_dataset, clean_data, generate_rul_labels, visualize_trends |
+| MonitorAgent | Stream data, predict RUL, flag alerts | stream_sensors, predict_rul, check_thresholds |
+| DiagnosticAgent | Root cause analysis, fleet comparison | compare_to_fleet, sensor_trends, degradation_rate |
+| MaintenanceAdvisorAgent | Recommendations + PDF reports | time_to_critical, recommend_action, generate_report |
+
+---
+
+## Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Agent orchestration | CrewAI 1.14 |
+| LLM | Google Gemini 2.5 Flash |
+| Deep learning | PyTorch (CNN-LSTM) |
+| REST API | FastAPI |
+| Dashboard | Plotly Dash |
+| Data | Pandas, NumPy, scikit-learn, SciPy |
+| Reports | ReportLab |
+| Dataset | NASA CMAPSS FD001 |
+
+---
+
+## Project Structure
+
+```
+SEN/
+├── config.yaml              # All configurable values
+├── agents/                  # CrewAI agent definitions
+├── crews/                   # Pipeline crew orchestration
+├── tools/                   # Ingest, predict, diagnostic, advisor tools
+├── models/                  # CNN-LSTM architecture + training script
+├── api/                     # FastAPI endpoints
+├── dashboard/               # Plotly Dash UI + AI chatbot
+├── data/raw/                # NASA CMAPSS FD001 raw files
+└── tests/                   # Phase verification tests
+```
+
+---
+
+## Setup
+
+```bash
+git clone https://github.com/ebukae05/SEN.git
+cd SEN
+python -m venv venv
+source venv/Scripts/activate   # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+Add your Gemini API key to `.env`:
+```
+GOOGLE_API_KEY=your_key_here
+```
+
+Get a free key at [aistudio.google.com](https://aistudio.google.com/app/apikey).
+
+---
+
+## Usage
+
+### Train the model
+```bash
+python models/train.py
+```
+
+### Run the full 4-agent pipeline
+```bash
+python -c "from crews.maintenance_crew import run_pipeline; print(run_pipeline(engine_id=1))"
+```
+
+### Start the REST API
+```bash
+uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+API docs available at `http://localhost:8000/docs`
+
+### Start the dashboard
+```bash
+python dashboard/app.py
+```
+
+Open `http://localhost:8050`
+
+---
+
+## Dashboard
+
+Three tabs:
+
+- **Fleet Overview** — Bar chart of RUL predictions for all 100 engines, coloured by severity (NORMAL / CAUTION / WARNING / CRITICAL)
+- **Engine Detail** — RUL degradation timeline and top 3 declining sensor trends for any selected engine
+- **AI Analysis** — Select an engine, click Analyze, and Gemini returns a plain-English assessment: cycles remaining, sensor concerns, fleet comparison, and a direct replace/schedule/monitor recommendation
+
+---
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/health` | Liveness check |
+| GET | `/engines` | List all 100 engine IDs |
+| GET | `/engine/{id}/status` | RUL + severity for one engine |
+| POST | `/analyze` | Run full 4-agent pipeline for one engine |
+
+---
+
+## Test Results
+
+| Phase | Test | Result |
+|-------|------|--------|
+| 2 | Ingest tools | ✅ 5/5 |
+| 4 | Stream + predict tools | ✅ 5/5 |
+| 5 | Diagnostic + advisor tools | ✅ 4/4 |
+| 6 | Full agent pipeline | ✅ 2/2 |
+| 7 | FastAPI endpoints | ✅ 4/4 |
+| 8 | Dashboard structure | ✅ 4/4 |
+
+---
+
+## Dataset
+
+NASA CMAPSS FD001 — [Turbofan Engine Degradation Simulation Data Set](https://www.nasa.gov/intelligent-systems-division/discovery-and-systems-health/pcoe/pcoe-data-set-repository/)
+
+- 100 engines run to failure
+- 21 sensor channels (14 used after dropping near-constant sensors)
+- 1 operating condition, 1 fault mode (HPC degradation)
+- RUL capped at 130 cycles (piecewise linear labeling)
