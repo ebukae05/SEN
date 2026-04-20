@@ -104,6 +104,60 @@ def test_visualize_trends() -> bool:
         return False
 
 
+from tools.stream_tools import stream_sensors
+from tools.predict_tools import predict_rul, check_thresholds
+
+
+def test_stream_sensors() -> bool:
+    """Verify stream_sensors yields correctly shaped windows."""
+    try:
+        df = load_dataset("train")
+        cleaned = clean_data(df)
+        windows = list(stream_sensors(cleaned, engine_id=1, window_size=30))
+        assert len(windows) > 0, "No windows yielded"
+        assert windows[0].shape == (30, 14), f"Expected (30, 14), got {windows[0].shape}"
+        logger.info("stream_sensors: OK — %d windows for engine 1", len(windows))
+        return True
+    except Exception as exc:
+        logger.error("stream_sensors FAILED: %s", exc)
+        return False
+
+
+def test_predict_rul() -> bool:
+    """Verify predict_rul returns a non-negative float for a valid window."""
+    try:
+        df = load_dataset("train")
+        cleaned = clean_data(df)
+        window = next(stream_sensors(cleaned, engine_id=1, window_size=30))
+        rul = predict_rul(window)
+        assert isinstance(rul, float), f"Expected float, got {type(rul)}"
+        assert rul >= 0.0, f"RUL should be non-negative, got {rul}"
+        logger.info("predict_rul: OK — predicted RUL=%.2f cycles", rul)
+        return True
+    except Exception as exc:
+        logger.error("predict_rul FAILED: %s", exc)
+        return False
+
+
+def test_check_thresholds() -> bool:
+    """Verify check_thresholds returns correct alert status for low and high RUL."""
+    try:
+        alert_result = check_thresholds(engine_id=1, rul=20.0, threshold=50)
+        assert alert_result["alert"] is True, "Expected alert for RUL=20 < threshold=50"
+        assert alert_result["severity"] != "NORMAL"
+
+        safe_result = check_thresholds(engine_id=2, rul=100.0, threshold=50)
+        assert safe_result["alert"] is False, "Expected no alert for RUL=100 > threshold=50"
+        assert safe_result["severity"] == "NORMAL"
+
+        logger.info("check_thresholds: OK — alert=%s, safe=%s",
+                    alert_result["severity"], safe_result["severity"])
+        return True
+    except Exception as exc:
+        logger.error("check_thresholds FAILED: %s", exc)
+        return False
+
+
 if __name__ == "__main__":
     results = {
         "load_dataset":        test_load_dataset(),
@@ -111,15 +165,18 @@ if __name__ == "__main__":
         "clean_data":          test_clean_data(),
         "generate_rul_labels": test_generate_rul_labels(),
         "visualize_trends":    test_visualize_trends(),
+        "stream_sensors":      test_stream_sensors(),
+        "predict_rul":         test_predict_rul(),
+        "check_thresholds":    test_check_thresholds(),
     }
 
     passed = sum(results.values())
     total = len(results)
-    logger.info("Phase 2 results: %d/%d passed", passed, total)
+    logger.info("Phase 2+4 results: %d/%d passed", passed, total)
 
     if passed < total:
         failed = [k for k, v in results.items() if not v]
         logger.error("Failed: %s", failed)
         sys.exit(1)
 
-    logger.info("Phase 2 COMPLETE — all ingest tools verified.")
+    logger.info("Phases 2+4 COMPLETE — all tools verified.")
