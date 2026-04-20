@@ -44,3 +44,11 @@ logs/
 
 # ReportLab output
 *.pdf
+
+# Node
+node_modules/
+.next/
+frontend_old_vite/
+
+# Claude
+.claude/
