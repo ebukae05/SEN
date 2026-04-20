@@ -12,14 +12,19 @@ Run with:
 """
 
 import logging
+import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import yaml
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 _PROJECT_ROOT = Path(__file__).parent.parent
+load_dotenv(dotenv_path=_PROJECT_ROOT / ".env")
 sys.path.insert(0, str(_PROJECT_ROOT))
 
 logger = logging.getLogger(__name__)
@@ -35,6 +40,13 @@ app = FastAPI(
     title="SEN — Sensor Engine Network",
     description="Real-time turbofan engine health monitoring via 4-agent AI pipeline.",
     version="1.0.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -139,4 +151,100 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
         return AnalyzeResponse(engine_id=request.engine_id, result=result)
     except Exception as exc:
         logger.exception("Pipeline failed for engine %d", request.engine_id)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── Fleet snapshot endpoint ───────────────────────────────────────────────────
+
+class EngineSnapshot(BaseModel):
+    id: int
+    name: str
+    rul: float
+    rulHistory: list[float]
+    healthPercent: int
+    cycleCount: int
+    status: str
+
+
+@app.get("/fleet", response_model=list[EngineSnapshot])
+def fleet_snapshot() -> list[EngineSnapshot]:
+    """
+    Return a health snapshot for every engine using ground-truth RUL at the 75%
+    lifecycle mark — fast, no CNN-LSTM inference required.
+    """
+    try:
+        import pandas as pd
+        cfg        = _load_config()
+        threshold  = cfg["monitor"]["rul_alert_threshold"]
+        df         = pd.read_csv(_clean_csv_path())
+        engines    = []
+
+        for eid in sorted(df["unit_id"].unique()):
+            edf        = df[df["unit_id"] == eid].sort_values("cycle").reset_index(drop=True)
+            idx        = int(len(edf) * 0.75)
+            rul        = float(edf.iloc[idx]["RUL"])
+            history    = [float(v) for v in edf["RUL"].iloc[max(0, idx - 9): idx + 1].tolist()]
+            cycle      = int(edf.iloc[idx]["cycle"])
+            health_pct = min(100, int(rul / 130 * 100))
+
+            if rul < threshold * 0.40:
+                status = "critical"
+            elif rul < threshold * 0.70:
+                status = "warning"
+            elif rul < threshold:
+                status = "caution"
+            else:
+                status = "healthy"
+
+            engines.append(EngineSnapshot(
+                id=int(eid),
+                name=f"Engine {int(eid):03d}",
+                rul=round(rul, 1),
+                rulHistory=history,
+                healthPercent=health_pct,
+                cycleCount=cycle,
+                status=status,
+            ))
+
+        return engines
+    except Exception as exc:
+        logger.exception("Fleet snapshot failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── Chat endpoint (React frontend → Gemini) ───────────────────────────────────
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    system_prompt: str
+    messages: list[ChatMessage]
+
+
+class ChatResponse(BaseModel):
+    response: str
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+def chat(request: ChatRequest) -> ChatResponse:
+    """Proxy chat messages to Gemini via the Google GenAI API."""
+    try:
+        from google import genai
+        client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+        # Build a single prompt: system context + conversation history
+        history = "\n".join(
+            f"{'User' if m.role == 'user' else 'Assistant'}: {m.content}"
+            for m in request.messages
+        )
+        full_prompt = f"{request.system_prompt}\n\n{history}\n\nAssistant:"
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=full_prompt,
+        )
+        return ChatResponse(response=response.text.strip())
+    except Exception as exc:
+        logger.exception("Chat request failed")
         raise HTTPException(status_code=500, detail=str(exc))
