@@ -1,0 +1,266 @@
+# SEN — Sensor Engine Network (v3)
+
+## Your Role
+You are a senior Python engineer implementing a system designed by the architect.
+The architecture is final. Do not suggest alternative frameworks, models, or patterns.
+Build exactly what is specified below. Ask clarifying questions only about
+implementation details, never about design decisions.
+
+## What This Project Is
+SEN is a real-time turbofan engine health monitoring system that uses a multi-agent
+AI pipeline to ingest sensor data, predict Remaining Useful Life (RUL), diagnose
+degradation patterns, and generate maintenance recommendations. This is a portfolio
+project targeting aerospace/defense engineering roles at companies like Boeing and
+Lockheed Martin.
+
+## Stack
+- Python 3.10+
+- CrewAI (agent orchestration framework)
+- Google Gemini 2.0 Flash (LLM powering agents — free tier)
+- PyTorch (CNN-LSTM model)
+- FastAPI (REST API)
+- Plotly Dash (dashboard prototype)
+- Pandas, NumPy, scikit-learn, SciPy, Matplotlib
+- ReportLab (PDF report generation)
+- NASA CMAPSS FD001 dataset
+
+## Project Structure
+```
+SEN/
+├── .cursorrules              # This file — project memory
+├── .env                      # API keys (GOOGLE_API_KEY) — never commit
+├── .gitignore
+├── requirements.txt
+├── config.yaml               # All configurable values
+├── README.md
+│
+├── data/
+│   ├── raw/                  # train_FD001.txt, test_FD001.txt, RUL_FD001.txt
+│   └── processed/            # Cleaned CSVs output by DataEngineerAgent
+│
+├── tools/                    # Python functions that agents call as tools
+│   ├── __init__.py
+│   ├── ingest_tools.py       # load_dataset, validate_sensors, clean_data, generate_rul_labels
+│   ├── stream_tools.py       # stream_sensors
+│   ├── predict_tools.py      # predict_rul, check_thresholds
+│   ├── diagnostic_tools.py   # compare_to_fleet, sensor_trends, degradation_rate
+│   └── advisor_tools.py      # time_to_critical, recommend_action, generate_report
+│
+├── agents/                   # CrewAI agent definitions
+│   ├── __init__.py
+│   ├── data_engineer.py      # DataEngineerAgent
+│   ├── monitor.py            # MonitorAgent
+│   ├── diagnostician.py      # DiagnosticAgent
+│   └── advisor.py            # MaintenanceAdvisorAgent
+│
+├── crews/                    # CrewAI crew orchestration
+│   ├── __init__.py
+│   └── maintenance_crew.py   # Full sequential pipeline crew
+│
+├── models/
+│   ├── cnn_lstm.py           # Model architecture definition
+│   ├── train.py              # Training script
+│   └── saved/                # Saved model weights (.pt files)
+│
+├── api/
+│   └── main.py               # FastAPI endpoints
+│
+├── dashboard/
+│   └── app.py                # Plotly Dash UI
+│
+├── notebooks/                # EDA and experimentation
+│   └── eda.ipynb
+│
+├── docs/
+│   └── architecture.png      # System design diagram from Draw.io
+│
+└── tests/
+    ├── test_tools.py
+    ├── test_agents.py
+    └── test_api.py
+```
+
+## System Architecture — 4 Agent Sequential Pipeline
+
+The pipeline runs sequentially via a CrewAI Crew. Each agent has a role, goal,
+backstory, and a set of tools (Python functions). Each agent's output feeds
+the next agent as context.
+
+### Agent 1: DataEngineerAgent
+- Role: "Senior Aerospace Data Engineer"
+- Goal: "Ingest, validate, clean, and prepare turbofan sensor data for ML prediction"
+- Tools:
+  - load_dataset(dataset_name) → loads raw CMAPSS txt, adds column headers, returns summary
+  - validate_sensors(df) → checks for missing values, constant sensors, out-of-range readings
+  - clean_data(df) → drops constant sensors (2, 3, 4, 8, 13), normalizes remaining 14 to 0-1
+  - generate_rul_labels(df, cap=130) → applies piecewise linear RUL labeling
+  - visualize_trends(df, engine_id) → plots sensor readings over time, saves chart
+- Libraries used: Pandas, NumPy, scikit-learn (MinMaxScaler), Matplotlib
+- Output: Clean DataFrame with 14 sensors normalized + RUL labels + quality report
+
+### Agent 2: MonitorAgent
+- Role: "Real-Time Engine Health Monitor"
+- Goal: "Stream sensor data, run RUL predictions, and flag engines approaching failure"
+- Tools:
+  - stream_sensors(df, engine_id, window_size=30) → yields sliding windows of sensor data
+  - predict_rul(window) → runs CNN-LSTM inference, returns predicted RUL
+  - check_thresholds(engine_id, rul, threshold=50) → returns alert if RUL < threshold
+- Libraries used: PyTorch, NumPy
+- Output: RUL predictions + anomaly flags per engine
+
+### Agent 3: DiagnosticAgent
+- Role: "Engine Diagnostics Specialist"
+- Goal: "Investigate flagged engines to determine root cause of degradation"
+- Tools:
+  - compare_to_fleet(df, engine_id) → compares engine metrics to fleet average
+  - sensor_trends(df, engine_id) → identifies which sensors are declining fastest
+  - degradation_rate(df, engine_id) → calculates rate of decline vs normal using linear regression
+- Libraries used: Pandas, NumPy, SciPy (linregress)
+- Output: Diagnosis with root cause, degrading sensors, severity rating
+
+### Agent 4: MaintenanceAdvisorAgent
+- Role: "Maintenance Planning Advisor"
+- Goal: "Generate actionable maintenance recommendations and formal reports"
+- Tools:
+  - time_to_critical(rul, degradation_rate) → estimates cycles until unsafe condition
+  - recommend_action(diagnosis) → uses Gemini to generate natural language recommendation
+  - generate_report(engine_id, diagnosis, recommendation) → creates PDF maintenance report
+- Libraries used: NumPy, Google Gemini API, ReportLab
+- Output: Maintenance recommendation + PDF report
+
+## CNN-LSTM Model Architecture
+```
+Input (30 timesteps × 14 features)
+→ Conv1D (filters=64, kernel=3, ReLU)
+→ Conv1D (filters=64, kernel=3, ReLU)
+→ MaxPooling1D (pool_size=2)
+→ LSTM (units=50, return_sequences=True)
+→ Dropout (0.3)
+→ LSTM (units=50)
+→ Dropout (0.3)
+→ Dense (1) → RUL output
+```
+- Loss: MSELoss
+- Optimizer: Adam (lr=0.001)
+- Epochs: 50
+- Batch size: 32
+- Sequence length: 30 cycles
+- RUL cap: 130 (piecewise linear labeling)
+
+## About the CMAPSS FD001 Dataset
+- 100 engines run to failure
+- 1 operating condition (sea level)
+- 1 fault mode (HPC degradation)
+- 21 sensor columns total
+- Drop sensors 1, 5, 6, 10, 16, 18, 19 (constant or near-constant)
+- Keep 14 sensors: 2, 3, 4, 7, 8, 9, 11, 12, 13, 14, 15, 17, 20, 21
+- Column names: unit_id, cycle, op1, op2, op3, s1-s21
+
+## Data File Locations
+- data/raw/train_FD001.txt
+- data/raw/test_FD001.txt
+- data/raw/RUL_FD001.txt
+
+## CrewAI Configuration
+```python
+from crewai import Crew, Process
+
+crew = Crew(
+    agents=[data_engineer, monitor, diagnostician, advisor],
+    tasks=[ingest_task, monitor_task, diagnose_task, advise_task],
+    process=Process.sequential,
+    verbose=True
+)
+```
+- LLM: Gemini 2.0 Flash via langchain-google-genai
+- Process: Sequential (each agent runs after the previous one completes)
+- Each agent receives the previous agent's output as context
+
+## Build Phases — Follow This Order
+
+### Phase 1: Project Setup
+- Create folder structure
+- Set up venv, install dependencies
+- Create config.yaml with all configurable values
+- Create .env with GOOGLE_API_KEY placeholder
+- Create .gitignore (include .env, __pycache__, models/saved/*.pt, data/processed/)
+- Verify CrewAI and Gemini connection work with a hello world test
+
+### Phase 2: Tools — Ingest
+- Build tools/ingest_tools.py
+- Implement: load_dataset, validate_sensors, clean_data, generate_rul_labels, visualize_trends
+- Each function is standalone and testable
+- Write tests in tests/test_tools.py
+- Test with actual FD001 data
+
+### Phase 3: CNN-LSTM Model
+- Build models/cnn_lstm.py (architecture definition)
+- Build models/train.py (training script)
+- Train on FD001, save weights to models/saved/
+- Target RMSE: ~13-16 cycles
+- Verify model loads and runs inference correctly
+
+### Phase 4: Tools — Stream + Predict
+- Build tools/stream_tools.py (stream_sensors)
+- Build tools/predict_tools.py (predict_rul, check_thresholds)
+- These tools wrap the model for inference
+- Test end-to-end: raw data → clean → stream → predict → RUL output
+
+### Phase 5: Tools — Diagnostic + Advisor
+- Build tools/diagnostic_tools.py (compare_to_fleet, sensor_trends, degradation_rate)
+- Build tools/advisor_tools.py (time_to_critical, recommend_action, generate_report)
+- recommend_action is the only function that calls the Gemini API
+- generate_report creates a real PDF using ReportLab
+- Test each function individually
+
+### Phase 6: Agents + Crew
+- Build agents/data_engineer.py, monitor.py, diagnostician.py, advisor.py
+- Each agent gets: role, goal, backstory, tools list, LLM config
+- Build crews/maintenance_crew.py — wires all agents into a sequential Crew
+- Test the full crew pipeline: crew.kickoff() runs all 4 agents in order
+- Verify output makes sense end-to-end
+
+### Phase 7: FastAPI
+- Build api/main.py
+- Endpoints:
+  - POST /analyze — triggers the full crew pipeline for a given engine
+  - GET /health — health check
+  - GET /engines — list all engines in the dataset
+  - GET /engine/{id}/status — get latest prediction for one engine
+- Test with curl or Swagger UI
+
+### Phase 8: Dashboard
+- Build dashboard/app.py using Plotly Dash
+- Panels: fleet overview, single engine detail, RUL timeline, agent activity log
+- Connects to FastAPI endpoints
+- Must be functional, not necessarily beautiful
+
+## Rules — Never Do These
+- Do not skip phases. Build and test each phase before moving to the next.
+- Do not write functions longer than 30 lines.
+- Do not use vague variable names like x, df2, temp, data1.
+- Do not bleed responsibilities between files. Tools do computation. Agents orchestrate.
+- Do not hardcode values. Everything configurable goes in config.yaml.
+- Do not store API keys in code. Use .env and python-dotenv.
+- Do not install packages without adding them to requirements.txt.
+- Do not write code without docstrings on every function.
+- Do not use print() for logging. Use Python's logging module.
+- Do not catch generic exceptions. Catch specific ones.
+
+## Rules — Always Do These
+- Always read config.yaml for any configurable value.
+- Always type hint every function parameter and return value.
+- Always write a docstring for every function explaining what it does, parameters, and returns.
+- Always validate inputs at the start of every function.
+- Always use pathlib.Path for file paths, never string concatenation.
+- Always use logging.getLogger(__name__) for logging.
+- Always test after completing each phase before moving on.
+- Always commit after each phase with a descriptive message.
+
+## Git Rules
+- Never run git push, git commit, or git add automatically.
+- Never touch git without explicit instruction from the architect.
+- All version control decisions are made by the architect only.
+
+## Current Phase
+Phase 1 — Project Setup

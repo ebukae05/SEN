@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m venv venv)",
+      "Bash(source venv/Scripts/activate)",
+      "Bash(pip install:*)",
+      "Bash(source /c/SEN/venv/Scripts/activate)",
+      "Bash(pip list:*)",
+      "Bash(python tests/test_connection.py)",
+      "Bash(python -c \":*)"
+    ]
+  }
+}

@@ -1,0 +1,117 @@
+# SEN — Sensor Engine Network Configuration
+# All configurable values live here. Never hardcode these in source files.
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  train_file: train_FD001.txt
+  test_file: test_FD001.txt
+  rul_file: RUL_FD001.txt
+
+  # CMAPSS FD001 column layout
+  columns:
+    - unit_id
+    - cycle
+    - op1
+    - op2
+    - op3
+    - s1
+    - s2
+    - s3
+    - s4
+    - s5
+    - s6
+    - s7
+    - s8
+    - s9
+    - s10
+    - s11
+    - s12
+    - s13
+    - s14
+    - s15
+    - s16
+    - s17
+    - s18
+    - s19
+    - s20
+    - s21
+
+  # Sensors to drop (constant / near-constant across all cycles)
+  drop_sensors:
+    - s1
+    - s5
+    - s6
+    - s10
+    - s16
+    - s18
+    - s19
+
+  # Sensors to keep after dropping (14 sensors)
+  keep_sensors:
+    - s2
+    - s3
+    - s4
+    - s7
+    - s8
+    - s9
+    - s11
+    - s12
+    - s13
+    - s14
+    - s15
+    - s17
+    - s20
+    - s21
+
+# ── RUL Labeling ──────────────────────────────────────────────────────────────
+rul:
+  cap: 130  # Piecewise linear RUL cap (cycles)
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+model:
+  sequence_length: 30       # Sliding window size (cycles)
+  n_features: 14            # Number of input sensor features
+  conv_filters: 64          # CNN Conv1D filter count
+  conv_kernel_size: 3       # CNN Conv1D kernel size
+  pool_size: 2              # MaxPool1D pool size
+  lstm_units: 50            # LSTM hidden units
+  dropout_rate: 0.3
+  dense_output: 1           # Single RUL output
+
+  training:
+    epochs: 50
+    batch_size: 32
+    learning_rate: 0.001
+    loss: mse
+
+  saved_dir: models/saved
+  weights_file: cnn_lstm_fd001.pt
+
+# ── Monitoring ────────────────────────────────────────────────────────────────
+monitor:
+  rul_alert_threshold: 50   # Flag engines with RUL below this (cycles)
+
+# ── LLM ───────────────────────────────────────────────────────────────────────
+llm:
+  provider: google
+  model: gemini/gemini-2.5-flash
+  temperature: 0.3
+
+# ── API ───────────────────────────────────────────────────────────────────────
+api:
+  host: 0.0.0.0
+  port: 8000
+  reload: true
+
+# ── Dashboard ─────────────────────────────────────────────────────────────────
+dashboard:
+  host: 0.0.0.0
+  port: 8050
+  debug: true
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging:
+  level: INFO
+  format: "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
