@@ -3,6 +3,7 @@ tools/predict_tools.py — MonitorAgent tools for RUL inference and threshold al
 
 Wraps the trained CNN-LSTM model for single-window inference and provides
 threshold checking to flag engines approaching failure.
+Supports per-dataset model loading (FD001–FD004).
 """
 
 import logging
@@ -18,7 +19,9 @@ logger = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).parent.parent
 _CONFIG_PATH = _PROJECT_ROOT / "config.yaml"
 
-# Module-level model cache — loaded once, reused across calls
+VALID_DATASETS = ("FD001", "FD002", "FD003", "FD004")
+
+# Module-level model cache — keyed by dataset_id, loaded once per dataset
 _model_cache: dict[str, Any] = {}
 
 
@@ -28,41 +31,58 @@ def _load_config() -> dict[str, Any]:
         return yaml.safe_load(fh)
 
 
-def _get_model() -> "torch.nn.Module":
+def _resolve_dataset_id(dataset_id: str | None) -> str:
+    """Resolve dataset_id, falling back to config active_dataset if None."""
+    if dataset_id is not None:
+        if dataset_id not in VALID_DATASETS:
+            raise ValueError(f"dataset_id must be one of {VALID_DATASETS}; got {dataset_id!r}")
+        return dataset_id
+    return _load_config()["data"]["active_dataset"]
+
+
+def _get_model(dataset_id: str | None = None) -> "torch.nn.Module":
     """
-    Load the CNN-LSTM model from saved weights, caching it after the first load.
+    Load the CNN-LSTM model for a specific dataset, caching after first load.
+
+    Parameters
+    ----------
+    dataset_id : str or None
+        Target dataset ('FD001'–'FD004'). Defaults to config active_dataset.
 
     Returns
     -------
     torch.nn.Module
-        Model in eval mode with weights loaded from config-specified path.
+        Model in eval mode with weights loaded.
 
     Raises
     ------
     FileNotFoundError
         If the weights file does not exist.
     """
-    if "model" in _model_cache:
-        return _model_cache["model"]
+    dataset_id = _resolve_dataset_id(dataset_id)
+
+    if dataset_id in _model_cache:
+        return _model_cache[dataset_id]
 
     import sys
     sys.path.insert(0, str(_PROJECT_ROOT))
     from models.cnn_lstm import build_model
 
-    cfg = _load_config()["model"]
-    weights_path = _PROJECT_ROOT / cfg["saved_dir"] / cfg["weights_file"]
+    cfg = _load_config()
+    weights_file = cfg["model"]["weights_files"][dataset_id]
+    weights_path = _PROJECT_ROOT / cfg["model"]["saved_dir"] / weights_file
     if not weights_path.exists():
         raise FileNotFoundError(f"Model weights not found: {weights_path}")
 
-    model = build_model()
+    model = build_model(dataset_id=dataset_id)
     model.load_state_dict(torch.load(weights_path, map_location="cpu", weights_only=True))
     model.eval()
-    _model_cache["model"] = model
+    _model_cache[dataset_id] = model
     logger.info("Model loaded from %s", weights_path)
     return model
 
 
-def predict_rul(window: np.ndarray) -> float:
+def predict_rul(window: np.ndarray, dataset_id: str | None = None) -> float:
     """
     Run CNN-LSTM inference on a single sensor window and return predicted RUL.
 
@@ -70,6 +90,8 @@ def predict_rul(window: np.ndarray) -> float:
     ----------
     window : np.ndarray
         Sensor window of shape (window_size, n_features) — normalized values.
+    dataset_id : str or None
+        Target dataset ('FD001'–'FD004'). Defaults to config active_dataset.
 
     Returns
     -------
@@ -88,7 +110,7 @@ def predict_rul(window: np.ndarray) -> float:
     if window.ndim != 2:
         raise ValueError(f"window must be 2D (seq_len, n_features), got shape {window.shape}")
 
-    model = _get_model()
+    model = _get_model(dataset_id)
     tensor = torch.from_numpy(window.astype(np.float32)).unsqueeze(0)  # (1, seq_len, n_features)
     with torch.no_grad():
         rul_pred = model(tensor).item()

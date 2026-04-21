@@ -3,6 +3,7 @@ agents/diagnostician.py — DiagnosticAgent definition and its CrewAI tools.
 
 Investigates flagged engines using fleet comparison, sensor trend analysis,
 and degradation rate quantification.
+Supports all CMAPSS datasets (FD001–FD004).
 """
 
 import logging
@@ -36,57 +37,57 @@ def _get_llm() -> LLM:
 
 
 @tool("Compare Engine to Fleet Average")
-def fleet_comparison_tool(engine_id: str) -> str:
+def fleet_comparison_tool(engine_id: str, dataset_id: str = "FD001") -> str:
     """
     Compare a specific engine's mean sensor readings against the full fleet average.
     Returns sensors that deviate significantly from fleet norms.
-    Input: engine_id as a string integer (e.g. '1').
+    Input: engine_id as a string integer (e.g. '1'), dataset_id as 'FD001'–'FD004'.
     """
     import pandas as pd
     from tools.diagnostic_tools import compare_to_fleet
     cfg = _load_config()
-    data_path = _PROJECT_ROOT / cfg["data"]["processed_dir"] / "train_clean.csv"
+    data_path = _PROJECT_ROOT / cfg["data"]["processed_dir"] / f"train_{dataset_id}_clean.csv"
     df = pd.read_csv(data_path)
-    result = compare_to_fleet(df, engine_id=int(engine_id))
+    result = compare_to_fleet(df, engine_id=int(engine_id), dataset_id=dataset_id)
     return (
-        f"Engine {engine_id} vs fleet: {len(result['outlier_sensors'])} sensors deviate >0.1. "
+        f"Engine {engine_id} vs fleet ({dataset_id}): {len(result['outlier_sensors'])} sensors deviate >0.1. "
         f"Outliers: {result['outlier_sensors']}."
     )
 
 
 @tool("Analyse Engine Sensor Trends")
-def sensor_trend_tool(engine_id: str) -> str:
+def sensor_trend_tool(engine_id: str, dataset_id: str = "FD001") -> str:
     """
     Identify which sensors are declining fastest for a specific engine using linear regression.
     Returns top 3 fastest-declining sensors and their slopes.
-    Input: engine_id as a string integer (e.g. '1').
+    Input: engine_id as a string integer (e.g. '1'), dataset_id as 'FD001'–'FD004'.
     """
     import pandas as pd
     from tools.diagnostic_tools import sensor_trends
     cfg = _load_config()
-    data_path = _PROJECT_ROOT / cfg["data"]["processed_dir"] / "train_clean.csv"
+    data_path = _PROJECT_ROOT / cfg["data"]["processed_dir"] / f"train_{dataset_id}_clean.csv"
     df = pd.read_csv(data_path)
-    result = sensor_trends(df, engine_id=int(engine_id))
+    result = sensor_trends(df, engine_id=int(engine_id), dataset_id=dataset_id)
     top3 = result["ranked_declining"][:3]
     slopes = {s: result["slopes"][s] for s in top3}
-    return f"Engine {engine_id} top declining sensors: {slopes}."
+    return f"Engine {engine_id} ({dataset_id}) top declining sensors: {slopes}."
 
 
 @tool("Calculate Engine Degradation Rate")
-def degradation_rate_tool(engine_id: str) -> str:
+def degradation_rate_tool(engine_id: str, dataset_id: str = "FD001") -> str:
     """
     Calculate the engine's degradation rate compared to the fleet average using linear regression.
     Returns the rate ratio and severity label (NORMAL / MODERATE / HIGH).
-    Input: engine_id as a string integer (e.g. '1').
+    Input: engine_id as a string integer (e.g. '1'), dataset_id as 'FD001'–'FD004'.
     """
     import pandas as pd
     from tools.diagnostic_tools import degradation_rate
     cfg = _load_config()
-    data_path = _PROJECT_ROOT / cfg["data"]["processed_dir"] / "train_clean.csv"
+    data_path = _PROJECT_ROOT / cfg["data"]["processed_dir"] / f"train_{dataset_id}_clean.csv"
     df = pd.read_csv(data_path)
-    result = degradation_rate(df, engine_id=int(engine_id))
+    result = degradation_rate(df, engine_id=int(engine_id), dataset_id=dataset_id)
     return (
-        f"Engine {engine_id} degradation: rate={result['engine_rate']:.6f}, "
+        f"Engine {engine_id} degradation ({dataset_id}): rate={result['engine_rate']:.6f}, "
         f"fleet={result['fleet_rate']:.6f}, ratio={result['ratio']:.3f}, "
         f"severity={result['severity']}."
     )

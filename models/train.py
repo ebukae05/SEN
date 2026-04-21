@@ -2,12 +2,14 @@
 models/train.py — Training script for the CNN-LSTM RUL model.
 
 Usage:
-    python models/train.py
+    python models/train.py                  # trains on default (FD001)
+    python models/train.py --dataset FD002  # trains on FD002
 
-Loads FD001 data, builds sliding-window sequences, trains the CNN-LSTM,
+Loads CMAPSS data, builds sliding-window sequences, trains the CNN-LSTM,
 and saves the best weights (by validation RMSE) to models/saved/.
 """
 
+import argparse
 import logging
 import sys
 from pathlib import Path
@@ -27,6 +29,8 @@ from tools.ingest_tools import clean_data, generate_rul_labels, load_dataset
 
 logger = logging.getLogger(__name__)
 _CONFIG_PATH = _PROJECT_ROOT / "config.yaml"
+
+VALID_DATASETS = ("FD001", "FD002", "FD003", "FD004")
 
 
 def _load_config() -> dict[str, Any]:
@@ -51,7 +55,7 @@ def create_sequences(
     df : pd.DataFrame
         Cleaned, RUL-labeled DataFrame with 'unit_id', 'cycle', sensor cols, 'RUL'.
     sensor_cols : list[str]
-        Names of the 14 sensor feature columns.
+        Names of the sensor feature columns.
     seq_len : int
         Number of cycles per sliding window.
 
@@ -220,40 +224,54 @@ def run_training_loop(
     return best_rmse
 
 
-def main() -> None:
-    """Full pipeline: load data → build sequences → train CNN-LSTM → save weights."""
+def main(dataset_id: str = "FD001") -> None:
+    """
+    Full pipeline: load data → build sequences → train CNN-LSTM → save weights.
+
+    Parameters
+    ----------
+    dataset_id : str
+        Target dataset ('FD001'–'FD004').
+    """
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
     )
     cfg = _load_config()
     model_cfg = cfg["model"]
+    ds_cfg = cfg["data"]["datasets"][dataset_id]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logger.info("Device: %s", device)
+    logger.info("Training %s on device: %s", dataset_id, device)
 
-    raw_df = load_dataset("train")
-    cleaned_df = clean_data(raw_df)
+    raw_df = load_dataset("train", dataset_id=dataset_id)
+    cleaned_df = clean_data(raw_df, dataset_id=dataset_id)
     labeled_df = generate_rul_labels(cleaned_df, cap=cfg["rul"]["cap"])
-    sensor_cols = cfg["data"]["keep_sensors"]
+
+    sensor_cols = ds_cfg["keep_sensors"]
     X, y = create_sequences(labeled_df, sensor_cols, model_cfg["sequence_length"])
     logger.info("Sequences built: X=%s  y=%s", X.shape, y.shape)
 
     train_loader, val_loader = build_dataloaders(X, y, model_cfg["training"]["batch_size"])
-    model = build_model().to(device)
+    model = build_model(dataset_id=dataset_id).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=model_cfg["training"]["learning_rate"])
     criterion = nn.MSELoss()
 
     saved_dir = _PROJECT_ROOT / model_cfg["saved_dir"]
     saved_dir.mkdir(parents=True, exist_ok=True)
-    weights_path = saved_dir / model_cfg["weights_file"]
+    weights_file = model_cfg["weights_files"][dataset_id]
+    weights_path = saved_dir / weights_file
 
     best_rmse = run_training_loop(
         model, train_loader, val_loader, optimizer, criterion,
         device, model_cfg["training"]["epochs"], weights_path,
     )
-    logger.info("Training complete. Best val RMSE: %.2f cycles", best_rmse)
+    logger.info("Training complete (%s). Best val RMSE: %.2f cycles", dataset_id, best_rmse)
     logger.info("Weights saved to: %s", weights_path)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Train CNN-LSTM RUL model on CMAPSS dataset")
+    parser.add_argument("--dataset", type=str, default="FD001", choices=VALID_DATASETS,
+                        help="CMAPSS dataset to train on (default: FD001)")
+    args = parser.parse_args()
+    main(dataset_id=args.dataset)

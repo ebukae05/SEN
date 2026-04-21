@@ -7,7 +7,29 @@
       "Bash(source /c/SEN/venv/Scripts/activate)",
       "Bash(pip list:*)",
       "Bash(python tests/test_connection.py)",
-      "Bash(python -c \":*)"
+      "Bash(python -c \":*)",
+      "Bash(python:*)",
+      "Bash(echo:*)",
+      "Bash(source /C/SEN/venv/Scripts/activate)",
+      "Bash(curl -s http://localhost:8000/fleet)",
+      "Bash(npm run:*)",
+      "Bash(curl -s http://localhost:3000 -o /dev/null -w \"%{http_code}\")",
+      "Bash(ls -la /c/SEN/*.py)",
+      "Bash(find /c/SEN -type f \\\\\\(-name *.sh -o -name *.bat -o -name *.cmd -o -name Makefile \\\\\\))",
+      "Bash(grep -r C: /c/SEN --include=*.py --include=*.yaml --include=*.json --include=*.md)",
+      "Bash(pip show:*)",
+      "Bash(grep -r \"^from\\\\|^import\" tools/*.py agents/*.py crews/*.py api/main.py models/cnn_lstm.py models/train.py)",
+      "Bash(chmod:*)",
+      "Bash(node:*)",
+      "Bash(docker compose:*)",
+      "Bash(npx tsc:*)",
+      "Bash(find /c/SEN -path */venv -prune -o -path */.next -prune -o -path */node_modules -prune -o -name *test* -print -o -name *spec* -print)",
+      "Bash(find /c/SEN -type d -name crews -o -name agents -o -name crew*)",
+      "Bash(find /c/SEN -maxdepth 1 -name *.py -o -name main.py -o -name run.py -o -name start.py)",
+      "Bash(find /c/SEN -maxdepth 1 -type f \\\\\\(-name *.py -o -name *.sh -o -name *.md \\\\\\) ! -path */venv/*)",
+      "Read(//c/Users/ebuka/AppData/Local/Temp/claude/C--SEN/1b1fc111-fa2f-4d39-b512-7d890db5dd47/tasks/**)",
+      "Bash(tasklist)",
+      "Bash(ls:*)"
     ]
   }
 }

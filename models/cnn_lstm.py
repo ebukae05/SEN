@@ -1,8 +1,10 @@
 """
 models/cnn_lstm.py — CNN-LSTM architecture for turbofan RUL regression.
 
+Supports per-dataset feature counts (14 for FD001/FD003, 16 for FD002/FD004).
+
 Architecture (from config.yaml):
-    Input (30 timesteps × 14 features)
+    Input (30 timesteps × n_features)
     → Conv1D (64 filters, kernel 3, ReLU)
     → Conv1D (64 filters, kernel 3, ReLU)
     → MaxPooling1D (pool 2)
@@ -27,6 +29,8 @@ logger = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).parent.parent
 _CONFIG_PATH = _PROJECT_ROOT / "config.yaml"
 
+VALID_DATASETS = ("FD001", "FD002", "FD003", "FD004")
+
 
 def _load_config() -> dict[str, Any]:
     """Load and return parsed config.yaml."""
@@ -36,7 +40,7 @@ def _load_config() -> dict[str, Any]:
 
 class CNNLSTM(nn.Module):
     """
-    CNN-LSTM model for Remaining Useful Life regression on CMAPSS FD001.
+    CNN-LSTM model for Remaining Useful Life regression on CMAPSS datasets.
 
     Input shape:  (batch_size, sequence_length, n_features)
     Output shape: (batch_size,)  — one predicted RUL per sample
@@ -57,7 +61,7 @@ class CNNLSTM(nn.Module):
         Parameters
         ----------
         n_features : int
-            Number of sensor input channels (14 for FD001).
+            Number of sensor input channels (14 for FD001/FD003, 16 for FD002/FD004).
         conv_filters : int
             Output channels for both Conv1d layers.
         conv_kernel : int
@@ -106,24 +110,39 @@ class CNNLSTM(nn.Module):
         return self.fc(x).squeeze(-1) # → (batch,)
 
 
-def build_model() -> CNNLSTM:
+def build_model(dataset_id: str | None = None) -> CNNLSTM:
     """
     Instantiate a CNNLSTM model using hyperparameters from config.yaml.
+
+    Parameters
+    ----------
+    dataset_id : str or None
+        Target dataset ('FD001'–'FD004') to determine n_features.
+        Defaults to config active_dataset.
 
     Returns
     -------
     CNNLSTM
         Untrained model instance ready for training or weight loading.
     """
-    cfg = _load_config()["model"]
+    cfg = _load_config()
+    model_cfg = cfg["model"]
+
+    if dataset_id is None:
+        dataset_id = cfg["data"]["active_dataset"]
+    if dataset_id not in VALID_DATASETS:
+        raise ValueError(f"dataset_id must be one of {VALID_DATASETS}; got {dataset_id!r}")
+
+    n_features = cfg["data"]["datasets"][dataset_id]["n_features"]
+
     model = CNNLSTM(
-        n_features=cfg["n_features"],
-        conv_filters=cfg["conv_filters"],
-        conv_kernel=cfg["conv_kernel_size"],
-        pool_size=cfg["pool_size"],
-        lstm_units=cfg["lstm_units"],
-        dropout_rate=cfg["dropout_rate"],
+        n_features=n_features,
+        conv_filters=model_cfg["conv_filters"],
+        conv_kernel=model_cfg["conv_kernel_size"],
+        pool_size=model_cfg["pool_size"],
+        lstm_units=model_cfg["lstm_units"],
+        dropout_rate=model_cfg["dropout_rate"],
     )
     n_params = sum(p.numel() for p in model.parameters())
-    logger.info("Built CNNLSTM: %d trainable parameters", n_params)
+    logger.info("Built CNNLSTM (%s, %d features): %d trainable parameters", dataset_id, n_features, n_params)
     return model

@@ -20,15 +20,18 @@ import {
 interface EngineDetailViewProps {
   engine: Engine
   onBack: () => void
+  dataset?: string
 }
 
 const sensorLabels: Record<string, string> = {
   s2: 'Total temp at LPC outlet',
-  s3: 'Total temp at HPC outlet', 
+  s3: 'Total temp at HPC outlet',
   s4: 'Total temp at LPT outlet',
+  s6: 'Total pressure at fan inlet',
   s7: 'Total pressure at HPC outlet',
   s8: 'Physical fan speed',
   s9: 'Physical core speed',
+  s10: 'Total pressure in bypass duct',
   s11: 'Static pressure at HPC outlet',
   s12: 'Ratio of fuel flow to Ps30',
   s13: 'Corrected fan speed',
@@ -42,10 +45,10 @@ const sensorLabels: Record<string, string> = {
 const sensorColors = [
   '#3b82f6', '#a78bfa', '#22c55e', '#eab308', '#ef4444',
   '#60a5fa', '#ec4899', '#f97316', '#06b6d4', '#8b5cf6',
-  '#84cc16', '#f43f5e', '#0ea5e9', '#d946ef',
+  '#84cc16', '#f43f5e', '#0ea5e9', '#d946ef', '#14b8a6', '#fb923c',
 ]
 
-export function EngineDetailView({ engine, onBack }: EngineDetailViewProps) {
+export function EngineDetailView({ engine, onBack, dataset = 'FD001' }: EngineDetailViewProps) {
   const [analysisResult, setAnalysisResult] = useState<string | null>(null)
   const [analysisLoading, setAnalysisLoading] = useState(false)
   const [analysisError, setAnalysisError] = useState<string | null>(null)
@@ -55,7 +58,7 @@ export function EngineDetailView({ engine, onBack }: EngineDetailViewProps) {
     setAnalysisResult(null)
     setAnalysisError(null)
     try {
-      const result = await runAnalysis(engine.engine_id)
+      const result = await runAnalysis(engine.engine_id, dataset)
       setAnalysisResult(result)
     } catch (err) {
       setAnalysisError('Analysis failed — is the API running?')
@@ -123,12 +126,12 @@ export function EngineDetailView({ engine, onBack }: EngineDetailViewProps) {
         ? `${sensors[0].id} (${sensors[0].label}) and ${sensors[1].id} (${sensors[1].label}) showing abnormal degradation. Recommend immediate fleet comparison.`
         : engine.status === 'watch'
         ? `${sensors[0].id} (${sensors[0].label}) trending below fleet baseline. ${sensors[1].id} (${sensors[1].label}) under observation.`
-        : `All 14 sensors within normal operating parameters. No anomalies detected.`,
+        : `All sensors within normal operating parameters. No anomalies detected.`,
     },
     {
       agent: 'DataEngineerAgent',
       time: '8m ago',
-      message: `Processed ${engine.current_cycle} cycles of telemetry data. 14 active sensors validated, 0 anomalies in data stream.`,
+      message: `Processed ${engine.current_cycle} cycles of telemetry data. ${Object.keys(engine.sensors).length} active sensors validated, 0 anomalies in data stream.`,
     },
   ]
 

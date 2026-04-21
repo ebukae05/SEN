@@ -2,6 +2,7 @@
 agents/data_engineer.py — DataEngineerAgent definition and its CrewAI tools.
 
 Tools save processed data to data/processed/ so downstream agents can load from disk.
+Supports all CMAPSS datasets (FD001–FD004).
 """
 
 import logging
@@ -35,23 +36,24 @@ def _get_llm() -> LLM:
 
 
 @tool("Ingest and Clean CMAPSS Dataset")
-def ingest_and_clean_tool(dataset_name: str) -> str:
+def ingest_and_clean_tool(dataset_name: str, dataset_id: str = "FD001") -> str:
     """
     Load a raw CMAPSS text file (train/test/rul), validate sensors, clean it,
-    generate piecewise linear RUL labels, and save to data/processed/{dataset_name}_clean.csv.
-    Always pass dataset_name as 'train' for the training pipeline.
+    generate piecewise linear RUL labels, and save to data/processed/train_{dataset_id}_clean.csv.
+    Pass dataset_name as 'train' for the training pipeline.
+    Pass dataset_id as 'FD001', 'FD002', 'FD003', or 'FD004'.
     """
     from tools.ingest_tools import clean_data, generate_rul_labels, load_dataset, validate_sensors
     cfg = _load_config()
-    df = load_dataset(dataset_name)
+    df = load_dataset(dataset_name, dataset_id=dataset_id)
     report = validate_sensors(df)
-    cleaned = clean_data(df)
+    cleaned = clean_data(df, dataset_id=dataset_id)
     labeled = generate_rul_labels(cleaned, cap=cfg["rul"]["cap"])
-    save_path = _PROJECT_ROOT / cfg["data"]["processed_dir"] / f"{dataset_name}_clean.csv"
+    save_path = _PROJECT_ROOT / cfg["data"]["processed_dir"] / f"{dataset_name}_{dataset_id}_clean.csv"
     save_path.parent.mkdir(parents=True, exist_ok=True)
     labeled.to_csv(save_path, index=False)
     return (
-        f"Dataset '{dataset_name}' ingested: {len(labeled)} rows, "
+        f"Dataset '{dataset_name}' ({dataset_id}) ingested: {len(labeled)} rows, "
         f"{labeled['unit_id'].nunique()} engines, "
         f"RUL range {labeled['RUL'].min()}–{labeled['RUL'].max()} cycles. "
         f"Constant sensors removed: {report['constant_sensors']}. "
@@ -60,19 +62,19 @@ def ingest_and_clean_tool(dataset_name: str) -> str:
 
 
 @tool("Visualize Engine Sensor Trends")
-def visualize_engine_trends_tool(engine_id: str) -> str:
+def visualize_engine_trends_tool(engine_id: str, dataset_id: str = "FD001") -> str:
     """
     Generate and save a sensor trend chart for a specific engine.
-    Requires ingest_and_clean_tool to have been run first so train_clean.csv exists.
-    Input: engine_id as a string integer (e.g. '1').
+    Requires ingest_and_clean_tool to have been run first so the clean CSV exists.
+    Input: engine_id as a string integer (e.g. '1'), dataset_id as 'FD001'–'FD004'.
     """
     import pandas as pd
     from tools.ingest_tools import visualize_trends
     cfg = _load_config()
-    data_path = _PROJECT_ROOT / cfg["data"]["processed_dir"] / "train_clean.csv"
+    data_path = _PROJECT_ROOT / cfg["data"]["processed_dir"] / f"train_{dataset_id}_clean.csv"
     df = pd.read_csv(data_path)
-    chart_path = visualize_trends(df, engine_id=int(engine_id))
-    return f"Sensor trend chart saved for engine {engine_id}: {chart_path}"
+    chart_path = visualize_trends(df, engine_id=int(engine_id), dataset_id=dataset_id)
+    return f"Sensor trend chart saved for engine {engine_id} ({dataset_id}): {chart_path}"
 
 
 def build_data_engineer_agent() -> Agent:

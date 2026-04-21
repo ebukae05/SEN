@@ -1,22 +1,8 @@
 // Engine status types
 export type EngineStatus = 'healthy' | 'watch' | 'critical'
 
-export interface EngineSensors {
-  s2: number
-  s3: number
-  s4: number
-  s7: number
-  s8: number
-  s9: number
-  s11: number
-  s12: number
-  s13: number
-  s14: number
-  s15: number
-  s17: number
-  s20: number
-  s21: number
-}
+/** Dynamic sensor map — keys vary by dataset (14 for FD001/FD003, 16 for FD002/FD004). */
+export type EngineSensors = Record<string, number>
 
 export interface Engine {
   engine_id: number

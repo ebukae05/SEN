@@ -3,6 +3,8 @@
  *
  * All functions read NEXT_PUBLIC_API_URL from the environment so the base URL
  * is never hardcoded.  Falls back to http://localhost:8000 for local dev.
+ *
+ * All data endpoints accept an optional `dataset` parameter (FD001–FD004).
  */
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
@@ -21,20 +23,7 @@ export interface ApiEngineSnapshot {
 
 export interface ApiSensorReading {
   cycle: number
-  s2: number
-  s3: number
-  s4: number
-  s7: number
-  s8: number
-  s9: number
-  s11: number
-  s12: number
-  s13: number
-  s14: number
-  s15: number
-  s17: number
-  s20: number
-  s21: number
+  sensors: Record<string, number>
 }
 
 export interface ApiEngineStatus {
@@ -42,6 +31,15 @@ export interface ApiEngineStatus {
   predicted_rul: number
   severity: string
   alert: boolean
+}
+
+export interface ApiDatasetInfo {
+  dataset_id: string
+  engines: number
+  fault_modes: number
+  operating_conditions: number
+  n_features: number
+  available: boolean
 }
 
 // ── Fetch helpers ─────────────────────────────────────────────────────────────
@@ -54,27 +52,32 @@ async function get<T>(path: string): Promise<T> {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/** Fetch health snapshot for all 100 engines. */
-export function fetchFleet(): Promise<ApiEngineSnapshot[]> {
-  return get<ApiEngineSnapshot[]>('/fleet')
+/** Fetch metadata for all available CMAPSS datasets. */
+export function fetchDatasets(): Promise<ApiDatasetInfo[]> {
+  return get<ApiDatasetInfo[]>('/datasets')
+}
+
+/** Fetch health snapshot for all engines in a dataset. */
+export function fetchFleet(dataset = 'FD001'): Promise<ApiEngineSnapshot[]> {
+  return get<ApiEngineSnapshot[]>(`/fleet?dataset=${dataset}`)
 }
 
 /** Fetch the last N cycles of sensor readings for one engine (default 50). */
-export function fetchSensors(engineId: number, lastN = 50): Promise<ApiSensorReading[]> {
-  return get<ApiSensorReading[]>(`/engine/${engineId}/sensors?last_n=${lastN}`)
+export function fetchSensors(engineId: number, lastN = 50, dataset = 'FD001'): Promise<ApiSensorReading[]> {
+  return get<ApiSensorReading[]>(`/engine/${engineId}/sensors?last_n=${lastN}&dataset=${dataset}`)
 }
 
 /** Fetch CNN-LSTM RUL prediction + severity for one engine. */
-export function fetchEngineStatus(engineId: number): Promise<ApiEngineStatus> {
-  return get<ApiEngineStatus>(`/engine/${engineId}/status`)
+export function fetchEngineStatus(engineId: number, dataset = 'FD001'): Promise<ApiEngineStatus> {
+  return get<ApiEngineStatus>(`/engine/${engineId}/status?dataset=${dataset}`)
 }
 
 /** Run the full 4-agent pipeline for one engine. Takes 2-3 minutes. */
-export async function runAnalysis(engineId: number): Promise<string> {
+export async function runAnalysis(engineId: number, dataset = 'FD001'): Promise<string> {
   const res = await fetch(`${BASE}/analyze`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ engine_id: engineId }),
+    body: JSON.stringify({ engine_id: engineId, dataset }),
   })
   if (!res.ok) throw new Error(`POST /analyze → ${res.status}`)
   const data = await res.json()

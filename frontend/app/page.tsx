@@ -17,9 +17,10 @@ import {
   Engine,
   EngineSensors,
 } from '@/lib/engine-utils'
-import { fetchFleet, fetchSensors, ApiEngineSnapshot } from '@/lib/api'
+import { fetchFleet, fetchSensors, ApiEngineSnapshot, fetchDatasets, ApiDatasetInfo } from '@/lib/api'
 
 type View = 'home' | 'fleet' | 'engine' | 'agents' | 'recommendations' | 'settings'
+type DatasetId = 'FD001' | 'FD002' | 'FD003' | 'FD004'
 
 /** Map API status values to the three-tier EngineStatus used by the UI. */
 function toEngineStatus(apiStatus: ApiEngineSnapshot['status']): Engine['status'] {
@@ -35,10 +36,7 @@ function snapshotToEngine(snap: ApiEngineSnapshot): Engine {
     current_cycle: snap.cycleCount,
     predicted_rul: snap.rul,
     status: toEngineStatus(snap.status),
-    // Sensor readings are fetched on-demand when an engine is selected.
-    sensors: Object.fromEntries(
-      ['s2','s3','s4','s7','s8','s9','s11','s12','s13','s14','s15','s17','s20','s21'].map(k => [k, 0])
-    ) as unknown as EngineSensors,
+    sensors: {} as EngineSensors,
     last_updated: new Date(),
     rul_history: snap.rulHistory.map((rul, i) => ({
       cycle: snap.cycleCount - (snap.rulHistory.length - 1 - i),
@@ -53,14 +51,25 @@ export default function SENDashboard() {
   const [selectedEngine, setSelectedEngine] = useState<Engine | null>(null)
   const [engines, setEngines] = useState<Engine[]>([])
   const [loading, setLoading] = useState(true)
+  const [dataset, setDataset] = useState<DatasetId>('FD001')
+  const [datasets, setDatasets] = useState<ApiDatasetInfo[]>([])
 
-  // Fetch real fleet data from the FastAPI backend on mount.
+  // Fetch available datasets on mount.
   useEffect(() => {
-    fetchFleet()
+    fetchDatasets()
+      .then(setDatasets)
+      .catch(err => console.error('Datasets fetch failed', err))
+  }, [])
+
+  // Fetch fleet data whenever the selected dataset changes.
+  useEffect(() => {
+    setLoading(true)
+    setSelectedEngine(null)
+    fetchFleet(dataset)
       .then(snapshots => setEngines(snapshots.map(snapshotToEngine)))
       .catch(err => console.error('Fleet fetch failed — is the API running?', err))
       .finally(() => setLoading(false))
-  }, [])
+  }, [dataset])
 
   const agentLogs = useMemo(() => generateAgentLogs(engines), [engines])
   const recommendations = useMemo(() => generateRecommendations(engines), [engines])
@@ -69,10 +78,10 @@ export default function SENDashboard() {
   const handleSelectEngine = async (engine: Engine) => {
     // Fetch real sensor history before navigating to the detail view.
     try {
-      const readings = await fetchSensors(engine.engine_id)
-      const sensor_history = readings.map(({ cycle, ...sensors }) => ({
-        cycle,
-        sensors: sensors as EngineSensors,
+      const readings = await fetchSensors(engine.engine_id, 50, dataset)
+      const sensor_history = readings.map((r) => ({
+        cycle: r.cycle,
+        sensors: r.sensors as EngineSensors,
       }))
       const latest = sensor_history[sensor_history.length - 1]
       setSelectedEngine({
@@ -115,7 +124,7 @@ export default function SENDashboard() {
         return <FleetView engines={engines} onSelectEngine={handleSelectEngine} />
       case 'engine':
         if (selectedEngine) {
-          return <EngineDetailView engine={selectedEngine} onBack={handleBackFromEngine} />
+          return <EngineDetailView engine={selectedEngine} onBack={handleBackFromEngine} dataset={dataset} />
         }
         return <FleetView engines={engines} onSelectEngine={handleSelectEngine} />
       case 'agents':
@@ -145,7 +154,28 @@ export default function SENDashboard() {
 
       {/* Main content area */}
       <div className="flex-1 flex flex-col overflow-hidden relative z-10">
-        {/* Fleet health header */}
+        {/* Dataset selector + Fleet health header */}
+        <div className="flex items-center gap-4 px-6 pt-4 pb-0">
+          <label className="text-sm text-muted-foreground font-medium">Dataset:</label>
+          <select
+            value={dataset}
+            onChange={(e) => setDataset(e.target.value as DatasetId)}
+            className="bg-secondary text-foreground text-sm rounded-md border border-border px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary"
+          >
+            {datasets.length > 0 ? datasets.map((d) => (
+              <option key={d.dataset_id} value={d.dataset_id} disabled={!d.available}>
+                {d.dataset_id} — {d.engines} engines, {d.fault_modes} fault mode(s), {d.operating_conditions} op cond(s)
+              </option>
+            )) : (
+              <>
+                <option value="FD001">FD001</option>
+                <option value="FD002">FD002</option>
+                <option value="FD003">FD003</option>
+                <option value="FD004">FD004</option>
+              </>
+            )}
+          </select>
+        </div>
         <FleetHeader summary={fleetSummary} />
 
         {/* Content area */}

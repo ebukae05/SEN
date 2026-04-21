@@ -3,6 +3,7 @@ tools/advisor_tools.py — MaintenanceAdvisorAgent tools for recommendations and
 
 Estimates time to critical failure, generates natural language maintenance
 recommendations via Gemini, and produces formal PDF reports using ReportLab.
+Supports all CMAPSS datasets (FD001–FD004).
 """
 
 import logging
@@ -59,6 +60,7 @@ def time_to_critical(rul: float, degradation_rate: float, critical_rul: float = 
     adjusted_rul = rul / degradation_rate
     cycles_to_critical = max(0.0, adjusted_rul - critical_rul)
     urgency = "IMMEDIATE" if cycles_to_critical < 10 else "SOON" if cycles_to_critical < 30 else "SCHEDULED"
+
     logger.info("Time to critical: %.1f cycles (urgency=%s)", cycles_to_critical, urgency)
     return {
         "rul":                round(float(rul), 2),
@@ -103,11 +105,14 @@ def recommend_action(diagnosis: dict[str, Any]) -> str:
 
     cfg = _load_config()
     model_name = cfg["llm"]["model"].replace("gemini/", "")
+    dataset_id = diagnosis.get("dataset_id", "FD001")
 
     prompt = (
-        f"You are a turbofan engine maintenance expert. Based on the following diagnostic data, "
-        f"provide a concise (3-5 sentences) actionable maintenance recommendation.\n\n"
+        f"You are a turbofan engine maintenance expert. Based on the following diagnostic data "
+        f"from the CMAPSS {dataset_id} dataset, provide a concise (3-5 sentences) actionable "
+        f"maintenance recommendation.\n\n"
         f"Engine ID: {diagnosis.get('engine_id', 'N/A')}\n"
+        f"Dataset: {dataset_id}\n"
         f"Predicted RUL: {diagnosis.get('rul', 'N/A')} cycles\n"
         f"Severity: {diagnosis.get('severity', 'N/A')}\n"
         f"Degradation ratio vs fleet: {diagnosis.get('ratio', 'N/A')}\n"
@@ -120,7 +125,7 @@ def recommend_action(diagnosis: dict[str, Any]) -> str:
     client = genai.Client(api_key=api_key)
     response = client.models.generate_content(model=model_name, contents=prompt)
     recommendation = response.text.strip()
-    logger.info("Gemini recommendation generated for engine %s", diagnosis.get("engine_id"))
+    logger.info("Gemini recommendation generated for engine %s (%s)", diagnosis.get("engine_id"), dataset_id)
     return recommendation
 
 
@@ -128,6 +133,7 @@ def generate_report(
     engine_id: int,
     diagnosis: dict[str, Any],
     recommendation: str,
+    dataset_id: str | None = None,
 ) -> Path:
     """
     Create a PDF maintenance report using ReportLab and save it to data/processed/reports/.
@@ -140,6 +146,8 @@ def generate_report(
         Diagnostic data dict (from DiagnosticAgent output).
     recommendation : str
         Natural language recommendation (from recommend_action).
+    dataset_id : str or None
+        Target dataset for filename namespacing. Defaults to config active_dataset.
 
     Returns
     -------
@@ -165,9 +173,12 @@ def generate_report(
     from reportlab.lib import colors
     import datetime
 
+    if dataset_id is None:
+        dataset_id = _load_config()["data"]["active_dataset"]
+
     reports_dir = _PROJECT_ROOT / _load_config()["data"]["processed_dir"] / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
-    output_path = reports_dir / f"engine_{engine_id}_report.pdf"
+    output_path = reports_dir / f"engine_{engine_id}_{dataset_id}_report.pdf"
 
     doc = SimpleDocTemplate(str(output_path), pagesize=letter,
                             leftMargin=inch, rightMargin=inch,
@@ -175,16 +186,16 @@ def generate_report(
     styles = getSampleStyleSheet()
     story = []
 
-    story.append(Paragraph("SEN — Engine Maintenance Report", styles["Title"]))
+    story.append(Paragraph(f"SEN — Engine Maintenance Report ({dataset_id})", styles["Title"]))
     story.append(Spacer(1, 0.2 * inch))
     story.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}", styles["Normal"]))
     story.append(Spacer(1, 0.3 * inch))
-    story.append(Paragraph(f"Engine ID: {engine_id}", styles["Heading2"]))
+    story.append(Paragraph(f"Engine ID: {engine_id} | Dataset: {dataset_id}", styles["Heading2"]))
     story.append(Spacer(1, 0.2 * inch))
 
     diag_data = [["Parameter", "Value"]] + [
         [str(k), str(round(v, 3) if isinstance(v, float) else v)]
-        for k, v in diagnosis.items() if k != "engine_id"
+        for k, v in diagnosis.items() if k not in ("engine_id", "dataset_id")
     ]
     table = Table(diag_data, colWidths=[2.5 * inch, 3.5 * inch])
     table.setStyle(TableStyle([

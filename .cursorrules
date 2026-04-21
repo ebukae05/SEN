@@ -16,13 +16,13 @@ Lockheed Martin.
 ## Stack
 - Python 3.10+
 - CrewAI (agent orchestration framework)
-- Google Gemini 2.0 Flash (LLM powering agents — free tier)
+- Google Gemini 2.5 Flash Lite (LLM powering agents — free tier)
 - PyTorch (CNN-LSTM model)
 - FastAPI (REST API)
-- Plotly Dash (dashboard prototype)
+- Next.js 16, shadcn/ui, Tailwind CSS, Recharts (dashboard)
 - Pandas, NumPy, scikit-learn, SciPy, Matplotlib
 - ReportLab (PDF report generation)
-- NASA CMAPSS FD001 dataset
+- NASA CMAPSS dataset (FD001, FD002, FD003, FD004)
 
 ## Project Structure
 ```
@@ -35,8 +35,8 @@ SEN/
 ├── README.md
 │
 ├── data/
-│   ├── raw/                  # train_FD001.txt, test_FD001.txt, RUL_FD001.txt
-│   └── processed/            # Cleaned CSVs output by DataEngineerAgent
+│   ├── raw/                  # train_FD001–FD004.txt, test_FD001–FD004.txt, RUL_FD001–FD004.txt
+│   └── processed/            # Cleaned CSVs per dataset (train_FD001_clean.csv, etc.)
 │
 ├── tools/                    # Python functions that agents call as tools
 │   ├── __init__.py
@@ -65,8 +65,13 @@ SEN/
 ├── api/
 │   └── main.py               # FastAPI endpoints
 │
-├── dashboard/
-│   └── app.py                # Plotly Dash UI
+├── frontend/                 # Next.js dashboard
+│   ├── Dockerfile            # Frontend container
+│   ├── app/                  # Next.js app router
+│   ├── components/
+│   │   ├── views/            # Fleet, Engine Detail, Agents, Recommendations, Home
+│   │   └── ui/               # shadcn/ui component library
+│   └── lib/                  # API client, engine utilities
 │
 ├── notebooks/                # EDA and experimentation
 │   └── eda.ipynb
@@ -90,13 +95,13 @@ the next agent as context.
 - Role: "Senior Aerospace Data Engineer"
 - Goal: "Ingest, validate, clean, and prepare turbofan sensor data for ML prediction"
 - Tools:
-  - load_dataset(dataset_name) → loads raw CMAPSS txt, adds column headers, returns summary
-  - validate_sensors(df) → checks for missing values, constant sensors, out-of-range readings
-  - clean_data(df) → drops constant sensors (2, 3, 4, 8, 13), normalizes remaining 14 to 0-1
+  - load_dataset(dataset_name, dataset_id) → loads raw CMAPSS txt for the specified dataset (FD001–FD004), adds column headers, returns summary
+  - validate_sensors(df) → dynamically detects constant/near-constant sensors per dataset (no hardcoded drop list)
+  - clean_data(df, dataset_id) → drops dataset-specific constant sensors, normalizes remaining to 0-1
   - generate_rul_labels(df, cap=130) → applies piecewise linear RUL labeling
-  - visualize_trends(df, engine_id) → plots sensor readings over time, saves chart
+  - visualize_trends(df, engine_id, dataset_id) → plots sensor readings over time, saves chart
 - Libraries used: Pandas, NumPy, scikit-learn (MinMaxScaler), Matplotlib
-- Output: Clean DataFrame with 14 sensors normalized + RUL labels + quality report
+- Output: Clean DataFrame with kept sensors normalized + RUL labels + quality report
 
 ### Agent 2: MonitorAgent
 - Role: "Real-Time Engine Health Monitor"
@@ -130,7 +135,7 @@ the next agent as context.
 
 ## CNN-LSTM Model Architecture
 ```
-Input (30 timesteps × 14 features)
+Input (30 timesteps × n_features)
 → Conv1D (filters=64, kernel=3, ReLU)
 → Conv1D (filters=64, kernel=3, ReLU)
 → MaxPooling1D (pool_size=2)
@@ -146,20 +151,34 @@ Input (30 timesteps × 14 features)
 - Batch size: 32
 - Sequence length: 30 cycles
 - RUL cap: 130 (piecewise linear labeling)
+- n_features varies by dataset: 14 for FD001/FD003, 16 for FD002/FD004
+- Multi-dataset training supported: train per dataset with `python models/train.py --dataset FD002`
+- Weights saved per dataset: models/saved/cnn_lstm_fd001.pt through cnn_lstm_fd004.pt
 
-## About the CMAPSS FD001 Dataset
-- 100 engines run to failure
-- 1 operating condition (sea level)
-- 1 fault mode (HPC degradation)
-- 21 sensor columns total
-- Drop sensors 1, 5, 6, 10, 16, 18, 19 (constant or near-constant)
-- Keep 14 sensors: 2, 3, 4, 7, 8, 9, 11, 12, 13, 14, 15, 17, 20, 21
-- Column names: unit_id, cycle, op1, op2, op3, s1-s21
+## About the CMAPSS Datasets
+The system supports all four CMAPSS turbofan degradation simulation sub-datasets:
+
+| Dataset | Engines | Operating Conditions | Fault Modes | Description |
+|---------|---------|---------------------|-------------|-------------|
+| FD001   | 100     | 1 (sea level)       | 1           | HPC degradation |
+| FD002   | 260     | 6                   | 1           | HPC degradation |
+| FD003   | 100     | 1 (sea level)       | 2           | HPC + fan degradation |
+| FD004   | 249     | 6                   | 2           | HPC + fan degradation |
+
+- All datasets share the same 26-column schema: unit_id, cycle, op1, op2, op3, s1–s21
+- 21 sensor columns total per dataset
+- Sensor dropping is dataset-aware:
+  - FD001/FD003 (1 op condition): drop s1, s5, s6, s10, s16, s18, s19 → keep 14 sensors
+  - FD002/FD004 (6 op conditions): drop s1, s5, s16, s18, s19 → keep 16 sensors
+  - validate_sensors() dynamically detects constant/near-constant sensors per dataset
+- RUL cap: 130 cycles (piecewise linear labeling, shared across all datasets)
+- Active dataset is set in config.yaml (`data.active_dataset`) and overridable via API/CLI
 
 ## Data File Locations
-- data/raw/train_FD001.txt
-- data/raw/test_FD001.txt
-- data/raw/RUL_FD001.txt
+- data/raw/train_FD001.txt, train_FD002.txt, train_FD003.txt, train_FD004.txt
+- data/raw/test_FD001.txt, test_FD002.txt, test_FD003.txt, test_FD004.txt
+- data/raw/RUL_FD001.txt, RUL_FD002.txt, RUL_FD003.txt, RUL_FD004.txt
+- Processed outputs namespaced per dataset: data/processed/train_FD001_clean.csv, etc.
 
 ## CrewAI Configuration
 ```python
@@ -189,16 +208,21 @@ crew = Crew(
 ### Phase 2: Tools — Ingest
 - Build tools/ingest_tools.py
 - Implement: load_dataset, validate_sensors, clean_data, generate_rul_labels, visualize_trends
+- All functions accept a dataset_id parameter (FD001–FD004) to select the target dataset
+- validate_sensors dynamically detects constant sensors per dataset (no hardcoded list)
+- clean_data reads dataset-specific drop/keep sensor lists from config.yaml
+- Processed files namespaced by dataset: train_FD001_clean.csv, scaler_FD001.pkl, etc.
 - Each function is standalone and testable
 - Write tests in tests/test_tools.py
-- Test with actual FD001 data
+- Test with actual dataset data (configurable via dataset_id)
 
 ### Phase 3: CNN-LSTM Model
-- Build models/cnn_lstm.py (architecture definition)
-- Build models/train.py (training script)
-- Train on FD001, save weights to models/saved/
-- Target RMSE: ~13-16 cycles
-- Verify model loads and runs inference correctly
+- Build models/cnn_lstm.py (architecture definition) — n_features read from dataset config
+- Build models/train.py (training script) — accepts --dataset CLI arg (default FD001)
+- Train per dataset, save weights to models/saved/cnn_lstm_{dataset_id}.pt
+- build_model(dataset_id) reads n_features from config.yaml data.datasets.<id>.n_features
+- Target RMSE: ~13-16 cycles (FD001), may vary for other datasets
+- Verify model loads and runs inference correctly per dataset
 
 ### Phase 4: Tools — Stream + Predict
 - Build tools/stream_tools.py (stream_sensors)
@@ -230,10 +254,13 @@ crew = Crew(
 - Test with curl or Swagger UI
 
 ### Phase 8: Dashboard
-- Build dashboard/app.py using Plotly Dash
-- Panels: fleet overview, single engine detail, RUL timeline, agent activity log
-- Connects to FastAPI endpoints
-- Must be functional, not necessarily beautiful
+- Next.js 16 app with shadcn/ui, Tailwind CSS, and Recharts
+- Views: Home, Fleet Overview, Engine Detail, Agents, Recommendations, Settings
+- Dataset selector dropdown — switch between FD001–FD004 on the fly
+- Fleet Overview: all engines with RUL predictions colored by severity (healthy/watch/critical)
+- Engine Detail: RUL timeline, sensor trend charts, agent diagnostics, deep AI analysis
+- Deep analysis button runs direct CNN-LSTM prediction + diagnostics (not the full crew)
+- Dynamic sensor handling: 14 sensors for FD001/FD003, 16 for FD002/FD004
 
 ## Rules — Never Do These
 - Do not skip phases. Build and test each phase before moving to the next.
@@ -263,4 +290,5 @@ crew = Crew(
 - All version control decisions are made by the architect only.
 
 ## Current Phase
-Phase 1 — Project Setup
+Phase 8 COMPLETE — All phases built and verified.
+Multi-dataset support (FD001–FD004) COMPLETE — config, tools, models, agents, crew, API, and frontend all support FD001–FD004. All 4 CNN-LSTM models trained and saved.

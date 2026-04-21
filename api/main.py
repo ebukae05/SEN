@@ -3,12 +3,15 @@ api/main.py — FastAPI REST layer for the SEN maintenance pipeline.
 
 Endpoints:
     GET  /health                  — Liveness check.
+    GET  /datasets                — List available CMAPSS datasets and metadata.
     GET  /engines                 — List all engine IDs in the processed dataset.
     GET  /engine/{id}/status      — RUL prediction + alert status for one engine.
     GET  /engine/{id}/sensors     — Normalized sensor history for one engine.
-    POST /analyze                 — Run the full 4-agent crew for one engine.
-    GET  /fleet                   — Health snapshot for all 100 engines.
+    POST /analyze                 — Run direct deep analysis for one engine.
+    GET  /fleet                   — Health snapshot for all engines in a dataset.
     POST /api/chat                — Proxy chat messages to Gemini.
+
+All data endpoints accept an optional `dataset` query parameter (FD001–FD004).
 
 Run with:
     uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
@@ -22,7 +25,7 @@ from typing import Any
 
 import yaml
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -33,6 +36,8 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 logger = logging.getLogger(__name__)
 _CONFIG_PATH = _PROJECT_ROOT / "config.yaml"
 
+VALID_DATASETS = ("FD001", "FD002", "FD003", "FD004")
+
 
 def _load_config() -> dict:
     with _CONFIG_PATH.open("r") as fh:
@@ -42,7 +47,7 @@ def _load_config() -> dict:
 app = FastAPI(
     title="SEN — Sensor Engine Network",
     description="Real-time turbofan engine health monitoring via 4-agent AI pipeline.",
-    version="1.0.0",
+    version="2.0.0",
 )
 
 _ALLOWED_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",")
@@ -59,10 +64,12 @@ app.add_middleware(
 
 class AnalyzeRequest(BaseModel):
     engine_id: int
+    dataset: str = "FD001"
 
 
 class AnalyzeResponse(BaseModel):
     engine_id: int
+    dataset: str
     result: str
 
 
@@ -77,18 +84,34 @@ class HealthResponse(BaseModel):
     status: str
 
 
+class DatasetInfo(BaseModel):
+    dataset_id: str
+    engines: int
+    fault_modes: int
+    operating_conditions: int
+    n_features: int
+    available: bool
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _clean_csv_path() -> Path:
+def _resolve_dataset(dataset: str) -> str:
+    """Validate and return dataset ID, raising 400 if invalid."""
+    if dataset not in VALID_DATASETS:
+        raise HTTPException(status_code=400, detail=f"Invalid dataset '{dataset}'. Must be one of {VALID_DATASETS}.")
+    return dataset
+
+
+def _clean_csv_path(dataset_id: str = "FD001") -> Path:
     cfg = _load_config()
-    return _PROJECT_ROOT / cfg["data"]["processed_dir"] / "train_clean.csv"
+    return _PROJECT_ROOT / cfg["data"]["processed_dir"] / f"train_{dataset_id}_clean.csv"
 
 
-def _get_engine_ids() -> list[int]:
+def _get_engine_ids(dataset_id: str = "FD001") -> list[int]:
     import pandas as pd
-    path = _clean_csv_path()
+    path = _clean_csv_path(dataset_id)
     if not path.exists():
-        raise FileNotFoundError("Clean dataset not found — run ingest first.")
+        raise FileNotFoundError(f"Clean dataset not found for {dataset_id} — run ingest first.")
     df = pd.read_csv(path)
     return sorted(int(x) for x in df["unit_id"].unique())
 
@@ -101,33 +124,66 @@ def health() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
+@app.get("/datasets", response_model=list[DatasetInfo])
+def list_datasets() -> list[DatasetInfo]:
+    """Return metadata for all CMAPSS datasets and whether their clean CSV is available."""
+    cfg = _load_config()
+    results = []
+    for ds_id, ds_cfg in cfg["data"]["datasets"].items():
+        csv_path = _clean_csv_path(ds_id)
+        results.append(DatasetInfo(
+            dataset_id=ds_id,
+            engines=_engine_count(ds_id, ds_cfg),
+            fault_modes=ds_cfg["fault_modes"],
+            operating_conditions=ds_cfg["operating_conditions"],
+            n_features=ds_cfg["n_features"],
+            available=csv_path.exists(),
+        ))
+    return results
+
+
+def _engine_count(ds_id: str, ds_cfg: dict) -> int:
+    """Return engine count from clean CSV if available, else from known dataset sizes."""
+    csv_path = _clean_csv_path(ds_id)
+    if csv_path.exists():
+        import pandas as pd
+        return int(pd.read_csv(csv_path)["unit_id"].nunique())
+    known = {"FD001": 100, "FD002": 260, "FD003": 100, "FD004": 249}
+    return known.get(ds_id, 0)
+
+
 @app.get("/engines", response_model=list[int])
-def list_engines() -> list[int]:
+def list_engines(dataset: str = Query("FD001", description="CMAPSS dataset ID")) -> list[int]:
     """Return all engine IDs available in the processed dataset."""
+    dataset = _resolve_dataset(dataset)
     try:
-        return _get_engine_ids()
+        return _get_engine_ids(dataset)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
 
 @app.get("/engine/{engine_id}/status", response_model=EngineStatus)
-def engine_status(engine_id: int) -> EngineStatus:
+def engine_status(
+    engine_id: int,
+    dataset: str = Query("FD001", description="CMAPSS dataset ID"),
+) -> EngineStatus:
     """Predict RUL and alert status for a single engine using the CNN-LSTM model."""
+    dataset = _resolve_dataset(dataset)
     try:
-        if engine_id not in _get_engine_ids():
-            raise HTTPException(status_code=404, detail=f"Engine {engine_id} not found.")
+        if engine_id not in _get_engine_ids(dataset):
+            raise HTTPException(status_code=404, detail=f"Engine {engine_id} not found in {dataset}.")
 
         import pandas as pd
         from tools.stream_tools import stream_sensors
         from tools.predict_tools import predict_rul, check_thresholds
 
         cfg = _load_config()
-        df = pd.read_csv(_clean_csv_path())
-        windows = list(stream_sensors(df, engine_id=engine_id, window_size=cfg["model"]["sequence_length"]))
+        df = pd.read_csv(_clean_csv_path(dataset))
+        windows = list(stream_sensors(df, engine_id=engine_id, window_size=cfg["model"]["sequence_length"], dataset_id=dataset))
         if not windows:
             raise HTTPException(status_code=422, detail=f"Engine {engine_id} has insufficient data.")
 
-        rul = predict_rul(windows[-1])
+        rul = predict_rul(windows[-1], dataset_id=dataset)
         alert_info = check_thresholds(engine_id, rul, threshold=cfg["monitor"]["rul_alert_threshold"])
 
         return EngineStatus(
@@ -139,7 +195,7 @@ def engine_status(engine_id: int) -> EngineStatus:
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("Status check failed for engine %d", engine_id)
+        logger.exception("Status check failed for engine %d (%s)", engine_id, dataset)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -152,32 +208,30 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     then makes a single Gemini call for the maintenance recommendation.
     Typically completes in 10-30 seconds instead of 2-3 minutes.
     """
+    dataset = _resolve_dataset(request.dataset)
     try:
-        result = _run_direct_analysis(request.engine_id)
-        return AnalyzeResponse(engine_id=request.engine_id, result=result)
+        result = _run_direct_analysis(request.engine_id, dataset)
+        return AnalyzeResponse(engine_id=request.engine_id, dataset=dataset, result=result)
     except Exception as exc:
-        logger.exception("Analysis failed for engine %d", request.engine_id)
+        logger.exception("Analysis failed for engine %d (%s)", request.engine_id, dataset)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-def _run_direct_analysis(engine_id: int) -> str:
+def _run_direct_analysis(engine_id: int, dataset_id: str = "FD001") -> str:
     """
     Execute the full diagnostic pipeline without CrewAI — direct tool calls only.
-
-    Steps: load data -> predict RUL -> check thresholds -> fleet comparison ->
-    sensor trends -> degradation rate -> time to critical -> Gemini recommendation
-    -> PDF report.
 
     Parameters
     ----------
     engine_id : int
         The engine unit_id to analyse.
+    dataset_id : str
+        CMAPSS dataset to use.
 
     Returns
     -------
     str
-        Formatted analysis report combining all diagnostic results and the
-        Gemini-generated maintenance recommendation.
+        Formatted analysis report.
     """
     import pandas as pd
     from tools.stream_tools import stream_sensors
@@ -186,38 +240,37 @@ def _run_direct_analysis(engine_id: int) -> str:
     from tools.advisor_tools import time_to_critical, recommend_action, generate_report
 
     cfg = _load_config()
-    csv_path = _clean_csv_path()
+    csv_path = _clean_csv_path(dataset_id)
     if not csv_path.exists():
-        raise FileNotFoundError("Clean dataset not found — run ingest first.")
+        raise FileNotFoundError(f"Clean dataset not found for {dataset_id} — run ingest first.")
 
     df = pd.read_csv(csv_path)
     if engine_id not in df["unit_id"].values:
-        raise ValueError(f"Engine {engine_id} not found in dataset.")
+        raise ValueError(f"Engine {engine_id} not found in {dataset_id}.")
 
     # Step 1: RUL prediction via CNN-LSTM at 75% lifecycle mark
-    # (matches the fleet snapshot point so dashboard RUL and analysis RUL agree)
-    logger.info("Direct analysis — engine %d — predicting RUL", engine_id)
-    windows = list(stream_sensors(df, engine_id=engine_id, window_size=cfg["model"]["sequence_length"]))
+    logger.info("Direct analysis — engine %d (%s) — predicting RUL", engine_id, dataset_id)
+    windows = list(stream_sensors(df, engine_id=engine_id, window_size=cfg["model"]["sequence_length"], dataset_id=dataset_id))
     if not windows:
         raise ValueError(f"Engine {engine_id} has insufficient data for prediction.")
     window_idx = int(len(windows) * 0.75)
-    rul = predict_rul(windows[window_idx])
+    rul = predict_rul(windows[window_idx], dataset_id=dataset_id)
 
     # Step 2: Threshold check
     alert_info = check_thresholds(engine_id, rul, threshold=cfg["monitor"]["rul_alert_threshold"])
     severity = alert_info["severity"]
 
     # Step 3: Fleet comparison
-    logger.info("Direct analysis — engine %d — running diagnostics", engine_id)
-    fleet_result = compare_to_fleet(df, engine_id)
+    logger.info("Direct analysis — engine %d (%s) — running diagnostics", engine_id, dataset_id)
+    fleet_result = compare_to_fleet(df, engine_id, dataset_id=dataset_id)
     outlier_sensors = fleet_result["outlier_sensors"]
 
     # Step 4: Sensor trend analysis
-    trend_result = sensor_trends(df, engine_id)
+    trend_result = sensor_trends(df, engine_id, dataset_id=dataset_id)
     top_declining = trend_result["ranked_declining"][:3]
 
     # Step 5: Degradation rate
-    deg_result = degradation_rate(df, engine_id)
+    deg_result = degradation_rate(df, engine_id, dataset_id=dataset_id)
     ratio = deg_result["ratio"]
     deg_severity = deg_result["severity"]
 
@@ -227,9 +280,10 @@ def _run_direct_analysis(engine_id: int) -> str:
     cycles_to_critical = crit_result["cycles_to_critical"]
 
     # Step 7: Single Gemini call for recommendation
-    logger.info("Direct analysis — engine %d — requesting Gemini recommendation", engine_id)
+    logger.info("Direct analysis — engine %d (%s) — requesting Gemini recommendation", engine_id, dataset_id)
     diagnosis = {
         "engine_id": engine_id,
+        "dataset_id": dataset_id,
         "rul": round(rul, 2),
         "severity": severity,
         "ratio": ratio,
@@ -245,12 +299,15 @@ def _run_direct_analysis(engine_id: int) -> str:
         "degradation_severity": deg_severity,
         "outlier_sensors": outlier_sensors,
     }
-    pdf_path = generate_report(engine_id, full_diagnosis, recommendation)
-    logger.info("Direct analysis — engine %d — complete", engine_id)
+    pdf_path = generate_report(engine_id, full_diagnosis, recommendation, dataset_id=dataset_id)
+    logger.info("Direct analysis — engine %d (%s) — complete", engine_id, dataset_id)
 
     # Format the output
+    ds_cfg = cfg["data"]["datasets"][dataset_id]
     report = (
-        f"=== SEN Deep Analysis — Engine {engine_id} ===\n\n"
+        f"=== SEN Deep Analysis — Engine {engine_id} ({dataset_id}) ===\n\n"
+        f"DATASET: {dataset_id} ({ds_cfg['fault_modes']} fault mode(s), "
+        f"{ds_cfg['operating_conditions']} operating condition(s))\n"
         f"PREDICTED RUL: {round(rul, 2)} cycles\n"
         f"SEVERITY: {severity}\n"
         f"DEGRADATION RATIO: {ratio}x fleet average ({deg_severity})\n"
@@ -262,7 +319,7 @@ def _run_direct_analysis(engine_id: int) -> str:
     )
     for sensor in top_declining:
         slope = trend_result["slopes"][sensor]
-        label = sensorLabels.get(sensor, sensor)
+        label = SENSOR_LABELS.get(sensor, sensor)
         report += f"  {sensor} ({label}): slope = {slope}\n"
     report += (
         f"\nMAINTENANCE RECOMMENDATION:\n"
@@ -273,13 +330,15 @@ def _run_direct_analysis(engine_id: int) -> str:
 
 
 # Sensor labels for formatted output
-sensorLabels = {
+SENSOR_LABELS = {
     "s2": "Total temp at LPC outlet",
     "s3": "Total temp at HPC outlet",
     "s4": "Total temp at LPT outlet",
+    "s6": "Total pressure at fan inlet",
     "s7": "Total pressure at HPC outlet",
     "s8": "Physical fan speed",
     "s9": "Physical core speed",
+    "s10": "Total pressure in bypass duct",
     "s11": "Static pressure at HPC outlet",
     "s12": "Ratio of fuel flow to Ps30",
     "s13": "Corrected fan speed",
@@ -293,48 +352,42 @@ sensorLabels = {
 
 # ── Sensor history endpoint ───────────────────────────────────────────────────
 
-SENSOR_COLS = ["s2", "s3", "s4", "s7", "s8", "s9", "s11", "s12", "s13", "s14", "s15", "s17", "s20", "s21"]
-
-
 class SensorReading(BaseModel):
     """One cycle's worth of normalized sensor values for a single engine."""
     cycle: int
-    s2: float
-    s3: float
-    s4: float
-    s7: float
-    s8: float
-    s9: float
-    s11: float
-    s12: float
-    s13: float
-    s14: float
-    s15: float
-    s17: float
-    s20: float
-    s21: float
+    sensors: dict[str, float]
 
 
 @app.get("/engine/{engine_id}/sensors", response_model=list[SensorReading])
-def engine_sensors(engine_id: int, last_n: int = 50) -> list[SensorReading]:
+def engine_sensors(
+    engine_id: int,
+    last_n: int = 50,
+    dataset: str = Query("FD001", description="CMAPSS dataset ID"),
+) -> list[SensorReading]:
     """
     Return the last N cycles of normalized sensor readings for one engine.
 
     Args:
         engine_id: Target engine unit ID.
         last_n:    How many of the most recent cycles to return (default 50).
+        dataset:   CMAPSS dataset ID (FD001–FD004).
     """
+    dataset = _resolve_dataset(dataset)
     try:
         import pandas as pd
 
-        path = _clean_csv_path()
+        path = _clean_csv_path(dataset)
         if not path.exists():
-            raise HTTPException(status_code=503, detail="Clean dataset not found — run ingest first.")
+            raise HTTPException(status_code=503, detail=f"Clean dataset not found for {dataset} — run ingest first.")
 
-        df  = pd.read_csv(path)
+        cfg = _load_config()
+        ds_cfg = cfg["data"]["datasets"][dataset]
+        sensor_cols = ds_cfg["keep_sensors"]
+
+        df = pd.read_csv(path)
         ids = sorted(int(x) for x in df["unit_id"].unique())
         if engine_id not in ids:
-            raise HTTPException(status_code=404, detail=f"Engine {engine_id} not found.")
+            raise HTTPException(status_code=404, detail=f"Engine {engine_id} not found in {dataset}.")
 
         edf = (
             df[df["unit_id"] == engine_id]
@@ -344,13 +397,16 @@ def engine_sensors(engine_id: int, last_n: int = 50) -> list[SensorReading]:
         )
 
         return [
-            SensorReading(cycle=int(row["cycle"]), **{col: round(float(row[col]), 6) for col in SENSOR_COLS})
+            SensorReading(
+                cycle=int(row["cycle"]),
+                sensors={col: round(float(row[col]), 6) for col in sensor_cols if col in edf.columns},
+            )
             for _, row in edf.iterrows()
         ]
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("Sensor history failed for engine %d", engine_id)
+        logger.exception("Sensor history failed for engine %d (%s)", engine_id, dataset)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -367,16 +423,23 @@ class EngineSnapshot(BaseModel):
 
 
 @app.get("/fleet", response_model=list[EngineSnapshot])
-def fleet_snapshot() -> list[EngineSnapshot]:
+def fleet_snapshot(
+    dataset: str = Query("FD001", description="CMAPSS dataset ID"),
+) -> list[EngineSnapshot]:
     """
     Return a health snapshot for every engine using ground-truth RUL at the 75%
     lifecycle mark — fast, no CNN-LSTM inference required.
     """
+    dataset = _resolve_dataset(dataset)
     try:
         import pandas as pd
         cfg        = _load_config()
         threshold  = cfg["monitor"]["rul_alert_threshold"]
-        df         = pd.read_csv(_clean_csv_path())
+        csv_path   = _clean_csv_path(dataset)
+        if not csv_path.exists():
+            raise HTTPException(status_code=503, detail=f"Clean dataset not found for {dataset} — run ingest first.")
+
+        df         = pd.read_csv(csv_path)
         engines    = []
 
         for eid in sorted(df["unit_id"].unique()):
@@ -407,8 +470,10 @@ def fleet_snapshot() -> list[EngineSnapshot]:
             ))
 
         return engines
+    except HTTPException:
+        raise
     except Exception as exc:
-        logger.exception("Fleet snapshot failed")
+        logger.exception("Fleet snapshot failed (%s)", dataset)
         raise HTTPException(status_code=500, detail=str(exc))
 
 

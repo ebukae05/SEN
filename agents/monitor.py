@@ -3,6 +3,7 @@ agents/monitor.py — MonitorAgent definition and its CrewAI tools.
 
 Loads the clean CSV produced by DataEngineerAgent, streams sensor windows,
 runs CNN-LSTM inference, and flags engines approaching failure.
+Supports all CMAPSS datasets (FD001–FD004).
 """
 
 import logging
@@ -36,26 +37,27 @@ def _get_llm() -> LLM:
 
 
 @tool("Predict Engine RUL")
-def predict_engine_rul_tool(engine_id: str) -> str:
+def predict_engine_rul_tool(engine_id: str, dataset_id: str = "FD001") -> str:
     """
-    Load the most recent sensor window for a specific engine from train_clean.csv,
+    Load the most recent sensor window for a specific engine from the clean CSV,
     run CNN-LSTM inference, and return the predicted Remaining Useful Life in cycles.
-    Input: engine_id as a string integer (e.g. '1').
+    Input: engine_id as a string integer (e.g. '1'), dataset_id as 'FD001'–'FD004'.
     """
     import numpy as np
     import pandas as pd
     from tools.predict_tools import predict_rul
     cfg = _load_config()
-    data_path = _PROJECT_ROOT / cfg["data"]["processed_dir"] / "train_clean.csv"
+    data_path = _PROJECT_ROOT / cfg["data"]["processed_dir"] / f"train_{dataset_id}_clean.csv"
     df = pd.read_csv(data_path)
     seq_len = cfg["model"]["sequence_length"]
-    sensor_cols = cfg["data"]["keep_sensors"]
+    ds_cfg = cfg["data"]["datasets"][dataset_id]
+    sensor_cols = ds_cfg["keep_sensors"]
     engine_df = df[df["unit_id"] == int(engine_id)].sort_values("cycle")
     if len(engine_df) < seq_len:
         return f"Engine {engine_id} has insufficient data ({len(engine_df)} cycles, need {seq_len})."
     window = engine_df[sensor_cols].values[-seq_len:].astype(np.float32)
-    rul = predict_rul(window)
-    return f"Engine {engine_id}: predicted RUL = {rul:.1f} cycles."
+    rul = predict_rul(window, dataset_id=dataset_id)
+    return f"Engine {engine_id} ({dataset_id}): predicted RUL = {rul:.1f} cycles."
 
 
 @tool("Check Engine Alert Threshold")

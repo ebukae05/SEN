@@ -3,6 +3,7 @@ tools/stream_tools.py — MonitorAgent tool for streaming sensor windows.
 
 Simulates real-time sensor ingestion by yielding sliding windows of
 cleaned sensor data for a given engine, one window at a time.
+Supports all CMAPSS datasets (FD001–FD004).
 """
 
 import logging
@@ -18,6 +19,8 @@ logger = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).parent.parent
 _CONFIG_PATH = _PROJECT_ROOT / "config.yaml"
 
+VALID_DATASETS = ("FD001", "FD002", "FD003", "FD004")
+
 
 def _load_config() -> dict[str, Any]:
     """Load and return parsed config.yaml."""
@@ -25,10 +28,20 @@ def _load_config() -> dict[str, Any]:
         return yaml.safe_load(fh)
 
 
+def _resolve_dataset_id(dataset_id: str | None) -> str:
+    """Resolve dataset_id, falling back to config active_dataset if None."""
+    if dataset_id is not None:
+        if dataset_id not in VALID_DATASETS:
+            raise ValueError(f"dataset_id must be one of {VALID_DATASETS}; got {dataset_id!r}")
+        return dataset_id
+    return _load_config()["data"]["active_dataset"]
+
+
 def stream_sensors(
     df: "pd.DataFrame",
     engine_id: int,
     window_size: int = 30,
+    dataset_id: str | None = None,
 ) -> Generator[np.ndarray, None, None]:
     """
     Yield sliding windows of sensor readings for a single engine.
@@ -44,6 +57,8 @@ def stream_sensors(
         The engine unit_id to stream data for.
     window_size : int
         Number of cycles per window (default 30, matches model sequence length).
+    dataset_id : str or None
+        Target dataset ('FD001'–'FD004'). Defaults to config active_dataset.
 
     Yields
     ------
@@ -66,8 +81,11 @@ def stream_sensors(
     if engine_id not in df["unit_id"].values:
         raise ValueError(f"engine_id {engine_id} not found in DataFrame")
 
+    dataset_id = _resolve_dataset_id(dataset_id)
     cfg = _load_config()
-    sensor_cols = [c for c in cfg["data"]["keep_sensors"] if c in df.columns]
+    ds_cfg = cfg["data"]["datasets"][dataset_id]
+    sensor_cols = [c for c in ds_cfg["keep_sensors"] if c in df.columns]
+
     engine_df = df[df["unit_id"] == engine_id].sort_values("cycle")
     sensor_data = engine_df[sensor_cols].values
 
@@ -78,7 +96,7 @@ def stream_sensors(
         )
 
     n_windows = len(sensor_data) - window_size + 1
-    logger.info("Streaming engine %d: %d windows of size %d", engine_id, n_windows, window_size)
+    logger.info("Streaming engine %d (%s): %d windows of size %d", engine_id, dataset_id, n_windows, window_size)
 
     for i in range(n_windows):
         yield sensor_data[i : i + window_size].astype(np.float32)

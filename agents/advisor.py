@@ -3,6 +3,7 @@ agents/advisor.py — MaintenanceAdvisorAgent definition and its CrewAI tools.
 
 Estimates time to critical failure, generates Gemini-powered recommendations,
 and produces formal PDF maintenance reports.
+Supports all CMAPSS datasets (FD001–FD004).
 """
 
 import logging
@@ -59,16 +60,18 @@ def maintenance_report_tool(
     degradation_ratio: str,
     top_declining_sensors: str,
     urgency: str,
+    dataset_id: str = "FD001",
 ) -> str:
     """
     Generate a Gemini-powered maintenance recommendation and save a PDF report.
     Inputs: engine_id (string int), rul (string float), severity (NORMAL/MODERATE/HIGH),
     degradation_ratio (string float), top_declining_sensors (comma-separated sensor names),
-    urgency (IMMEDIATE/SOON/SCHEDULED).
+    urgency (IMMEDIATE/SOON/SCHEDULED), dataset_id ('FD001'–'FD004').
     """
     from tools.advisor_tools import generate_report, recommend_action
     diagnosis = {
         "engine_id":         int(engine_id),
+        "dataset_id":        dataset_id,
         "rul":               float(rul),
         "severity":          severity,
         "ratio":             float(degradation_ratio),
@@ -80,9 +83,10 @@ def maintenance_report_tool(
         engine_id=int(engine_id),
         diagnosis=diagnosis,
         recommendation=recommendation,
+        dataset_id=dataset_id,
     )
     return (
-        f"Recommendation for Engine {engine_id}: {recommendation[:200]}... "
+        f"Recommendation for Engine {engine_id} ({dataset_id}): {recommendation[:200]}... "
         f"Full PDF report saved to: {report_path}"
     )
 
