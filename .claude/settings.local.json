@@ -29,7 +29,13 @@
       "Bash(find /c/SEN -maxdepth 1 -type f \\\\\\(-name *.py -o -name *.sh -o -name *.md \\\\\\) ! -path */venv/*)",
       "Read(//c/Users/ebuka/AppData/Local/Temp/claude/C--SEN/1b1fc111-fa2f-4d39-b512-7d890db5dd47/tasks/**)",
       "Bash(tasklist)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(curl -s http://localhost:8000/datasets)",
+      "Bash(curl -s \"http://localhost:8000/fleet?dataset=FD001\")",
+      "Bash(curl -s \"http://localhost:8000/fleet?dataset=FD002\")",
+      "Bash(curl -s \"http://localhost:8000/fleet?dataset=FD003\")",
+      "Bash(curl -s \"http://localhost:8000/fleet?dataset=FD004\")"
     ]
   }
 }

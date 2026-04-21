@@ -1,5 +1,5 @@
 """
-tests/test_tools.py — Phase 2 verification tests for tools/ingest_tools.py.
+tests/test_tools.py — Verification tests for all tool modules.
 
 Run with:
     python tests/test_tools.py
@@ -25,11 +25,14 @@ from tools.ingest_tools import (
     visualize_trends,
 )
 
+DATASET_ID = "FD001"
+EXPECTED_SENSORS = {"FD001": 14, "FD002": 16, "FD003": 14, "FD004": 16}
+
 
 def test_load_dataset() -> bool:
     """Verify load_dataset returns a correctly shaped DataFrame."""
     try:
-        df = load_dataset("train")
+        df = load_dataset("train", dataset_id=DATASET_ID)
         assert len(df) > 0, "DataFrame is empty"
         assert "unit_id" in df.columns, "Missing unit_id column"
         assert "cycle" in df.columns, "Missing cycle column"
@@ -44,7 +47,7 @@ def test_load_dataset() -> bool:
 def test_validate_sensors() -> bool:
     """Verify validate_sensors returns a report with all expected keys."""
     try:
-        df = load_dataset("train")
+        df = load_dataset("train", dataset_id=DATASET_ID)
         report = validate_sensors(df)
         for key in ("missing_values", "constant_sensors", "infinite_values", "total_rows", "total_sensors"):
             assert key in report, f"Missing key: {key}"
@@ -57,12 +60,13 @@ def test_validate_sensors() -> bool:
 
 
 def test_clean_data() -> bool:
-    """Verify clean_data keeps 14 sensors and normalizes them to [0, 1]."""
+    """Verify clean_data keeps correct sensor count and normalizes to [0, 1]."""
     try:
-        df = load_dataset("train")
-        cleaned = clean_data(df)
+        n_expected = EXPECTED_SENSORS[DATASET_ID]
+        df = load_dataset("train", dataset_id=DATASET_ID)
+        cleaned = clean_data(df, dataset_id=DATASET_ID)
         sensor_cols = [c for c in cleaned.columns if c.startswith("s")]
-        assert len(sensor_cols) == 14, f"Expected 14 sensor cols, got {len(sensor_cols)}"
+        assert len(sensor_cols) == n_expected, f"Expected {n_expected} sensor cols, got {len(sensor_cols)}"
         for col in sensor_cols:
             assert cleaned[col].min() >= -1e-6, f"{col} min below 0: {cleaned[col].min()}"
             assert cleaned[col].max() <= 1 + 1e-6, f"{col} max above 1: {cleaned[col].max()}"
@@ -76,8 +80,8 @@ def test_clean_data() -> bool:
 def test_generate_rul_labels() -> bool:
     """Verify generate_rul_labels adds a RUL column capped at 130 with min 0."""
     try:
-        df = load_dataset("train")
-        cleaned = clean_data(df)
+        df = load_dataset("train", dataset_id=DATASET_ID)
+        cleaned = clean_data(df, dataset_id=DATASET_ID)
         labeled = generate_rul_labels(cleaned, cap=130)
         assert "RUL" in labeled.columns, "RUL column missing"
         assert labeled["RUL"].max() <= 130, f"RUL exceeds cap: {labeled['RUL'].max()}"
@@ -90,11 +94,11 @@ def test_generate_rul_labels() -> bool:
 
 
 def test_visualize_trends() -> bool:
-    """Verify visualize_trends saves a PNG chart to data/processed/charts/."""
+    """Verify visualize_trends saves a PNG chart."""
     try:
-        df = load_dataset("train")
-        cleaned = clean_data(df)
-        chart_path = visualize_trends(cleaned, engine_id=1)
+        df = load_dataset("train", dataset_id=DATASET_ID)
+        cleaned = clean_data(df, dataset_id=DATASET_ID)
+        chart_path = visualize_trends(cleaned, engine_id=1, dataset_id=DATASET_ID)
         assert chart_path.exists(), f"Chart file not saved: {chart_path}"
         assert chart_path.suffix == ".png", f"Expected .png, got {chart_path.suffix}"
         logger.info("visualize_trends: OK — chart at %s", chart_path)
@@ -111,11 +115,12 @@ from tools.predict_tools import predict_rul, check_thresholds
 def test_stream_sensors() -> bool:
     """Verify stream_sensors yields correctly shaped windows."""
     try:
-        df = load_dataset("train")
-        cleaned = clean_data(df)
-        windows = list(stream_sensors(cleaned, engine_id=1, window_size=30))
+        n_expected = EXPECTED_SENSORS[DATASET_ID]
+        df = load_dataset("train", dataset_id=DATASET_ID)
+        cleaned = clean_data(df, dataset_id=DATASET_ID)
+        windows = list(stream_sensors(cleaned, engine_id=1, window_size=30, dataset_id=DATASET_ID))
         assert len(windows) > 0, "No windows yielded"
-        assert windows[0].shape == (30, 14), f"Expected (30, 14), got {windows[0].shape}"
+        assert windows[0].shape == (30, n_expected), f"Expected (30, {n_expected}), got {windows[0].shape}"
         logger.info("stream_sensors: OK — %d windows for engine 1", len(windows))
         return True
     except Exception as exc:
@@ -126,10 +131,10 @@ def test_stream_sensors() -> bool:
 def test_predict_rul() -> bool:
     """Verify predict_rul returns a non-negative float for a valid window."""
     try:
-        df = load_dataset("train")
-        cleaned = clean_data(df)
-        window = next(stream_sensors(cleaned, engine_id=1, window_size=30))
-        rul = predict_rul(window)
+        df = load_dataset("train", dataset_id=DATASET_ID)
+        cleaned = clean_data(df, dataset_id=DATASET_ID)
+        window = next(stream_sensors(cleaned, engine_id=1, window_size=30, dataset_id=DATASET_ID))
+        rul = predict_rul(window, dataset_id=DATASET_ID)
         assert isinstance(rul, float), f"Expected float, got {type(rul)}"
         assert rul >= 0.0, f"RUL should be non-negative, got {rul}"
         logger.info("predict_rul: OK — predicted RUL=%.2f cycles", rul)
@@ -165,9 +170,9 @@ from tools.advisor_tools import time_to_critical, recommend_action, generate_rep
 def test_compare_to_fleet() -> bool:
     """Verify compare_to_fleet returns deltas and outlier sensors."""
     try:
-        df = load_dataset("train")
-        cleaned = clean_data(df)
-        result = compare_to_fleet(cleaned, engine_id=1)
+        df = load_dataset("train", dataset_id=DATASET_ID)
+        cleaned = clean_data(df, dataset_id=DATASET_ID)
+        result = compare_to_fleet(cleaned, engine_id=1, dataset_id=DATASET_ID)
         assert "deltas" in result
         assert "outlier_sensors" in result
         assert result["engine_id"] == 1
@@ -181,12 +186,13 @@ def test_compare_to_fleet() -> bool:
 def test_sensor_trends() -> bool:
     """Verify sensor_trends returns slopes and a ranked list."""
     try:
-        df = load_dataset("train")
-        cleaned = clean_data(df)
-        result = sensor_trends(cleaned, engine_id=1)
+        n_expected = EXPECTED_SENSORS[DATASET_ID]
+        df = load_dataset("train", dataset_id=DATASET_ID)
+        cleaned = clean_data(df, dataset_id=DATASET_ID)
+        result = sensor_trends(cleaned, engine_id=1, dataset_id=DATASET_ID)
         assert "slopes" in result
         assert "ranked_declining" in result
-        assert len(result["slopes"]) == 14
+        assert len(result["slopes"]) == n_expected
         logger.info("sensor_trends: OK — top decliner: %s", result["ranked_declining"][0])
         return True
     except Exception as exc:
@@ -197,9 +203,9 @@ def test_sensor_trends() -> bool:
 def test_degradation_rate() -> bool:
     """Verify degradation_rate returns a ratio and severity label."""
     try:
-        df = load_dataset("train")
-        cleaned = clean_data(df)
-        result = degradation_rate(cleaned, engine_id=1)
+        df = load_dataset("train", dataset_id=DATASET_ID)
+        cleaned = clean_data(df, dataset_id=DATASET_ID)
+        result = degradation_rate(cleaned, engine_id=1, dataset_id=DATASET_ID)
         assert "ratio" in result
         assert "severity" in result
         assert result["severity"] in ("NORMAL", "MODERATE", "HIGH")
@@ -232,6 +238,7 @@ def test_recommend_action() -> bool:
         diagnosis = {
             "engine_id": 1, "rul": 25.0, "severity": "WARNING",
             "ratio": 1.4, "ranked_declining": ["s14", "s11", "s9"], "urgency": "SOON",
+            "dataset_id": DATASET_ID,
         }
         rec = recommend_action(diagnosis)
         assert isinstance(rec, str) and len(rec) > 10, "Empty recommendation"
@@ -253,6 +260,7 @@ def test_generate_report() -> bool:
             engine_id=1,
             diagnosis=diagnosis,
             recommendation="Schedule immediate inspection of HPC blades.",
+            dataset_id=DATASET_ID,
         )
         assert report_path.exists(), f"PDF not found: {report_path}"
         assert report_path.suffix == ".pdf"
@@ -283,11 +291,11 @@ if __name__ == "__main__":
 
     passed = sum(results.values())
     total = len(results)
-    logger.info("Phase 2+4+5 results: %d/%d passed", passed, total)
+    logger.info("Tool tests: %d/%d passed", passed, total)
 
     if passed < total:
         failed = [k for k, v in results.items() if not v]
         logger.error("Failed: %s", failed)
         sys.exit(1)
 
-    logger.info("Phases 2+4+5 COMPLETE — all tools verified.")
+    logger.info("All tool tests PASSED.")
