@@ -1,4 +1,20 @@
 services:
+  trainer:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    env_file:
+      - .env
+    volumes:
+      - model-data:/app/models/saved
+      - processed-data:/app/data/processed
+    # Run training, then exit. Setting `entrypoint` here overrides the image's
+    # ENTRYPOINT and also clears its CMD (per Compose spec), so we don't need
+    # to override `command`. Idempotent — skips datasets that already have
+    # processed CSVs and weights on the shared volumes.
+    entrypoint: ["./train.sh"]
+    restart: "no"
+
   api:
     build:
       context: .
@@ -10,12 +26,16 @@ services:
     volumes:
       - model-data:/app/models/saved
       - processed-data:/app/data/processed
+    depends_on:
+      trainer:
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 30s
 
   frontend:
     build:

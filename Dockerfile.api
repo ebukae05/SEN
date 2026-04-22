@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy project files
 COPY config.yaml .
 COPY entrypoint.sh .
+COPY train.sh .
 COPY api/ api/
 COPY agents/ agents/
 COPY crews/ crews/
@@ -20,7 +21,9 @@ COPY tools/ tools/
 COPY models/ models/
 COPY data/ data/
 
-RUN chmod +x entrypoint.sh
+# Strip CR from shell scripts in case they were checked out on Windows
+# with CRLF endings (would cause "/bin/sh\r: no such file" at runtime).
+RUN sed -i 's/\r$//' entrypoint.sh train.sh && chmod +x entrypoint.sh train.sh
 
 EXPOSE 8000
 
