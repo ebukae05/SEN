@@ -7,22 +7,31 @@ Build exactly what is specified below. Ask clarifying questions only about
 implementation details, never about design decisions.
 
 ## What This Project Is
-SEN is a real-time turbofan engine health monitoring system that uses a multi-agent
-AI pipeline to ingest sensor data, predict Remaining Useful Life (RUL), diagnose
-degradation patterns, and generate maintenance recommendations. This is a portfolio
-project targeting aerospace/defense engineering roles at companies like Boeing and
-Lockheed Martin.
+SEN is a real-time predictive maintenance platform that uses a multi-agent AI pipeline
+to ingest sensor data from any rotating machinery, predict Remaining Useful Life (RUL),
+diagnose degradation patterns, and generate maintenance recommendations. While the
+initial use case is aircraft turbofan engines using NASA CMAPSS data, SEN is designed
+to be sensor-agnostic — it can work with any industrial equipment that produces
+time-series sensor data (wind turbines, railroad bearings, industrial pumps, naval
+vessels, manufacturing equipment).
+
+This is a portfolio project targeting aerospace/defense engineering roles and a future
+consulting/SaaS business targeting MRO shops, industrial operators, and defense
+contractors.
 
 ## Stack
 - Python 3.10+
 - CrewAI (agent orchestration framework)
-- Google Gemini 2.5 Flash Lite (LLM powering agents — free tier)
-- PyTorch (CNN-LSTM model)
-- FastAPI (REST API)
-- Next.js 16, shadcn/ui, Tailwind CSS, Recharts (dashboard)
-- Pandas, NumPy, scikit-learn, SciPy, Matplotlib
+- Google Gemini 2.5 Flash (LLM powering agents — free tier via langchain-google-genai)
+- PyTorch (CNN-LSTM model training and inference)
+- FastAPI (REST API backend)
+- React + TypeScript + Tailwind CSS (frontend dashboard — built separately in v0.dev)
+- Pandas, NumPy, scikit-learn (MinMaxScaler), SciPy (linregress), Matplotlib
 - ReportLab (PDF report generation)
-- NASA CMAPSS dataset (FD001, FD002, FD003, FD004)
+- Python-dotenv (environment variable management)
+- Pytest (testing)
+- Docker (containerization)
+- NASA CMAPSS FD001-FD004 datasets
 
 ## Project Structure
 ```
@@ -33,14 +42,20 @@ SEN/
 ├── requirements.txt
 ├── config.yaml               # All configurable values
 ├── README.md
+├── prompts.md                # Saved Cursor prompts
 │
 ├── data/
-│   ├── raw/                  # train_FD001–FD004.txt, test_FD001–FD004.txt, RUL_FD001–FD004.txt
-│   └── processed/            # Cleaned CSVs per dataset (train_FD001_clean.csv, etc.)
+│   ├── raw/                  # train_FD001-4.txt, test_FD001-4.txt, RUL_FD001-4.txt
+│   └── processed/            # Cleaned CSVs output by preprocess.py
+│
+├── cdh/                      # Command and Data Handling layer
+│   ├── __init__.py
+│   └── handler.py            # Format detection, validation, schema adapter, prioritization
+│
+├── preprocess.py             # Deterministic preprocessing script (NOT an agent)
 │
 ├── tools/                    # Python functions that agents call as tools
 │   ├── __init__.py
-│   ├── ingest_tools.py       # load_dataset, validate_sensors, clean_data, generate_rul_labels
 │   ├── stream_tools.py       # stream_sensors
 │   ├── predict_tools.py      # predict_rul, check_thresholds
 │   ├── diagnostic_tools.py   # compare_to_fleet, sensor_trends, degradation_rate
@@ -48,7 +63,6 @@ SEN/
 │
 ├── agents/                   # CrewAI agent definitions
 │   ├── __init__.py
-│   ├── data_engineer.py      # DataEngineerAgent
 │   ├── monitor.py            # MonitorAgent
 │   ├── diagnostician.py      # DiagnosticAgent
 │   └── advisor.py            # MaintenanceAdvisorAgent
@@ -65,13 +79,8 @@ SEN/
 ├── api/
 │   └── main.py               # FastAPI endpoints
 │
-├── frontend/                 # Next.js dashboard
-│   ├── Dockerfile            # Frontend container
-│   ├── app/                  # Next.js app router
-│   ├── components/
-│   │   ├── views/            # Fleet, Engine Detail, Agents, Recommendations, Home
-│   │   └── ui/               # shadcn/ui component library
-│   └── lib/                  # API client, engine utilities
+├── outputs/
+│   └── reports/              # Generated PDF maintenance reports
 │
 ├── notebooks/                # EDA and experimentation
 │   └── eda.ipynb
@@ -80,62 +89,84 @@ SEN/
 │   └── architecture.png      # System design diagram from Draw.io
 │
 └── tests/
+    ├── test_cdh.py
+    ├── test_preprocess.py
     ├── test_tools.py
     ├── test_agents.py
     └── test_api.py
 ```
 
-## System Architecture — 4 Agent Sequential Pipeline
+## System Architecture
 
-The pipeline runs sequentially via a CrewAI Crew. Each agent has a role, goal,
-backstory, and a set of tools (Python functions). Each agent's output feeds
-the next agent as context.
+### Overview
+```
+Raw sensor data (any format)
+→ CDH Layer (validate, prioritize, format)
+→ preprocess.py (clean, normalize, label)
+→ MonitorAgent → DiagnosticAgent → MaintenanceAdvisorAgent
+→ FastAPI → React Dashboard + PDF Reports
+```
 
-### Agent 1: DataEngineerAgent
-- Role: "Senior Aerospace Data Engineer"
-- Goal: "Ingest, validate, clean, and prepare turbofan sensor data for ML prediction"
-- Tools:
-  - load_dataset(dataset_name, dataset_id) → loads raw CMAPSS txt for the specified dataset (FD001–FD004), adds column headers, returns summary
-  - validate_sensors(df) → dynamically detects constant/near-constant sensors per dataset (no hardcoded drop list)
-  - clean_data(df, dataset_id) → drops dataset-specific constant sensors, normalizes remaining to 0-1
-  - generate_rul_labels(df, cap=130) → applies piecewise linear RUL labeling
-  - visualize_trends(df, engine_id, dataset_id) → plots sensor readings over time, saves chart
-- Libraries used: Pandas, NumPy, scikit-learn (MinMaxScaler), Matplotlib
-- Output: Clean DataFrame with kept sensors normalized + RUL labels + quality report
+### CDH Layer (cdh/handler.py)
+The Command and Data Handling layer sits between raw data input and preprocessing.
+Inspired by spacecraft CDH systems — manages data flow, validation, and formatting.
 
-### Agent 2: MonitorAgent
+Responsibilities:
+- Accept CSV, JSON, and Excel (.xlsx) input formats
+- Detect format automatically from file extension
+- Validate that required columns exist
+- Accept a schema config that maps user-defined column names to SEN's internal format
+- Flag missing sensor readings, out-of-range values, corrupted data
+- Prioritize engines with low RUL when processing multiple engines
+- Convert any format to SEN's internal standard Pandas DataFrame
+- Log all validation errors and data quality issues
+
+This is what makes SEN sensor-agnostic. The CDH layer normalizes any input format
+into SEN's internal standard so the agents and model never care what format came in.
+
+### preprocess.py (Deterministic Script — NOT an agent)
+Always runs the same steps in the same order. No LLM involved.
+- Load specified CMAPSS dataset from data/raw/
+- Add column headers
+- Validate data and identify constant sensors dynamically
+- Drop constant sensors (detected per dataset, not hardcoded)
+- Normalize remaining sensors to 0-1 using MinMaxScaler
+- Generate RUL labels using piecewise linear method with cap from config.yaml
+- Save cleaned data to data/processed/
+
+### Agent 1: MonitorAgent
 - Role: "Real-Time Engine Health Monitor"
-- Goal: "Stream sensor data, run RUL predictions, and flag engines approaching failure"
+- Goal: "Stream sensor data through the CNN-LSTM model and flag engines approaching failure"
 - Tools:
-  - stream_sensors(df, engine_id, window_size=30) → yields sliding windows of sensor data
-  - predict_rul(window) → runs CNN-LSTM inference, returns predicted RUL
-  - check_thresholds(engine_id, rul, threshold=50) → returns alert if RUL < threshold
-- Libraries used: PyTorch, NumPy
+  - stream_sensors(df, engine_id, window_size) → yields sliding windows
+  - predict_rul(window) → runs CNN-LSTM inference, returns RUL float
+  - check_thresholds(engine_id, rul, threshold) → returns alert if RUL below threshold
+- Libraries: PyTorch, NumPy
 - Output: RUL predictions + anomaly flags per engine
 
-### Agent 3: DiagnosticAgent
+### Agent 2: DiagnosticAgent
 - Role: "Engine Diagnostics Specialist"
-- Goal: "Investigate flagged engines to determine root cause of degradation"
+- Goal: "Investigate flagged engines to determine root cause and severity of degradation"
 - Tools:
   - compare_to_fleet(df, engine_id) → compares engine metrics to fleet average
-  - sensor_trends(df, engine_id) → identifies which sensors are declining fastest
-  - degradation_rate(df, engine_id) → calculates rate of decline vs normal using linear regression
-- Libraries used: Pandas, NumPy, SciPy (linregress)
+  - sensor_trends(df, engine_id) → ranks sensors by rate of decline
+  - degradation_rate(df, engine_id) → calculates rate of decline using scipy linregress
+- Libraries: Pandas, NumPy, SciPy
 - Output: Diagnosis with root cause, degrading sensors, severity rating
 
-### Agent 4: MaintenanceAdvisorAgent
+### Agent 3: MaintenanceAdvisorAgent
 - Role: "Maintenance Planning Advisor"
-- Goal: "Generate actionable maintenance recommendations and formal reports"
+- Goal: "Generate actionable maintenance recommendations and formal PDF reports"
 - Tools:
-  - time_to_critical(rul, degradation_rate) → estimates cycles until unsafe condition
-  - recommend_action(diagnosis) → uses Gemini to generate natural language recommendation
-  - generate_report(engine_id, diagnosis, recommendation) → creates PDF maintenance report
-- Libraries used: NumPy, Google Gemini API, ReportLab
+  - time_to_critical(rul, degradation_rate) → estimates cycles until unsafe
+  - recommend_action(diagnosis) → calls Gemini 2.5 Flash, returns recommendation string
+  - generate_report(engine_id, diagnosis, recommendation) → creates PDF via ReportLab
+- Libraries: NumPy, Google Gemini API, ReportLab
 - Output: Maintenance recommendation + PDF report
 
 ## CNN-LSTM Model Architecture
 ```
-Input (30 timesteps × n_features)
+Input (30 timesteps × 14 features)
 → Conv1D (filters=64, kernel=3, ReLU)
 → Conv1D (filters=64, kernel=3, ReLU)
 → MaxPooling1D (pool_size=2)
@@ -151,138 +182,152 @@ Input (30 timesteps × n_features)
 - Batch size: 32
 - Sequence length: 30 cycles
 - RUL cap: 130 (piecewise linear labeling)
-- n_features varies by dataset: 14 for FD001/FD003, 16 for FD002/FD004
-- Multi-dataset training supported: train per dataset with `python models/train.py --dataset FD002`
-- Weights saved per dataset: models/saved/cnn_lstm_fd001.pt through cnn_lstm_fd004.pt
+- Target RMSE: 13-16 cycles on FD001 test set
 
 ## About the CMAPSS Datasets
-The system supports all four CMAPSS turbofan degradation simulation sub-datasets:
+All four datasets share the same 21 sensor columns. Constant sensors vary per dataset
+and must be detected dynamically by validate_sensors, not hardcoded.
 
-| Dataset | Engines | Operating Conditions | Fault Modes | Description |
-|---------|---------|---------------------|-------------|-------------|
-| FD001   | 100     | 1 (sea level)       | 1           | HPC degradation |
-| FD002   | 260     | 6                   | 1           | HPC degradation |
-| FD003   | 100     | 1 (sea level)       | 2           | HPC + fan degradation |
-| FD004   | 249     | 6                   | 2           | HPC + fan degradation |
+- FD001: 100 engines, 1 operating condition, 1 fault mode (HPC degradation)
+- FD002: 260 engines, 6 operating conditions, 1 fault mode (HPC degradation)
+- FD003: 100 engines, 1 operating condition, 2 fault modes (HPC + fan degradation)
+- FD004: 249 engines, 6 operating conditions, 2 fault modes (HPC + fan degradation)
 
-- All datasets share the same 26-column schema: unit_id, cycle, op1, op2, op3, s1–s21
-- 21 sensor columns total per dataset
-- Sensor dropping is dataset-aware:
-  - FD001/FD003 (1 op condition): drop s1, s5, s6, s10, s16, s18, s19 → keep 14 sensors
-  - FD002/FD004 (6 op conditions): drop s1, s5, s16, s18, s19 → keep 16 sensors
-  - validate_sensors() dynamically detects constant/near-constant sensors per dataset
-- RUL cap: 130 cycles (piecewise linear labeling, shared across all datasets)
-- Active dataset is set in config.yaml (`data.active_dataset`) and overridable via API/CLI
+Column names: unit_id, cycle, op1, op2, op3, s1-s21
+Keep 14 sensors after dropping constants (exact sensors determined dynamically per dataset)
 
 ## Data File Locations
-- data/raw/train_FD001.txt, train_FD002.txt, train_FD003.txt, train_FD004.txt
-- data/raw/test_FD001.txt, test_FD002.txt, test_FD003.txt, test_FD004.txt
-- data/raw/RUL_FD001.txt, RUL_FD002.txt, RUL_FD003.txt, RUL_FD004.txt
-- Processed outputs namespaced per dataset: data/processed/train_FD001_clean.csv, etc.
+- data/raw/train_FD001.txt through train_FD004.txt
+- data/raw/test_FD001.txt through test_FD004.txt
+- data/raw/RUL_FD001.txt through RUL_FD004.txt
 
 ## CrewAI Configuration
 ```python
 from crewai import Crew, Process
 
 crew = Crew(
-    agents=[data_engineer, monitor, diagnostician, advisor],
-    tasks=[ingest_task, monitor_task, diagnose_task, advise_task],
+    agents=[monitor, diagnostician, advisor],
+    tasks=[monitor_task, diagnose_task, advise_task],
     process=Process.sequential,
     verbose=True
 )
 ```
-- LLM: Gemini 2.0 Flash via langchain-google-genai
-- Process: Sequential (each agent runs after the previous one completes)
+- LLM: Gemini 2.5 Flash via langchain-google-genai
+- Process: Sequential
 - Each agent receives the previous agent's output as context
+
+## FastAPI Endpoints
+- GET /health — health check, returns status ok
+- GET /engines — list all engine IDs from processed dataset
+- GET /engine/{id}/status — latest prediction for one engine
+- POST /analyze — accepts engine_id, triggers full crew pipeline, returns results
+
+## Frontend Dashboard (React + TypeScript — built in v0.dev)
+The frontend is a separate React/TypeScript/Tailwind application.
+FastAPI serves data. The dashboard consumes it via REST API calls.
+Do NOT build a Plotly Dash dashboard. Do NOT build any Python frontend.
+
+Dashboard panels:
+- Fleet health summary bar — total engines, green/yellow/red counts, avg RUL, active alerts
+- Fleet overview grid — all engines color-coded by status, sortable by urgency
+- Single engine detail — RUL countdown, degradation curve, sensor trends over cycles
+- Agent activity log — scrolling feed of what each agent found, color-coded by severity
+- Maintenance recommendations panel — latest recommendations with severity badges
+
+## Sensor-Agnostic Design Principles
+SEN is not an aircraft-only tool. The CDH layer's schema adapter allows any operator
+to map their own column names to SEN's internal format. This means SEN can monitor:
+- Aircraft turbofan engines (current use case)
+- Wind turbine gearboxes
+- Railroad wheel bearings
+- Industrial pumps and compressors
+- Naval vessel engines
+- Manufacturing equipment
+
+The model needs retraining per equipment type but the architecture stays the same.
 
 ## Build Phases — Follow This Order
 
 ### Phase 1: Project Setup
-- Create folder structure
-- Set up venv, install dependencies
+- Create full folder structure
+- Set up venv, install all dependencies
 - Create config.yaml with all configurable values
 - Create .env with GOOGLE_API_KEY placeholder
-- Create .gitignore (include .env, __pycache__, models/saved/*.pt, data/processed/)
-- Verify CrewAI and Gemini connection work with a hello world test
+- Create .gitignore
+- Verify CrewAI and Gemini 2.5 Flash connect successfully
 
-### Phase 2: Tools — Ingest
-- Build tools/ingest_tools.py
-- Implement: load_dataset, validate_sensors, clean_data, generate_rul_labels, visualize_trends
-- All functions accept a dataset_id parameter (FD001–FD004) to select the target dataset
-- validate_sensors dynamically detects constant sensors per dataset (no hardcoded list)
-- clean_data reads dataset-specific drop/keep sensor lists from config.yaml
-- Processed files namespaced by dataset: train_FD001_clean.csv, scaler_FD001.pkl, etc.
-- Each function is standalone and testable
+### Phase 2: CDH Layer
+- Build cdh/handler.py
+- Support CSV, JSON, Excel input formats
+- Schema adapter for user-defined column mapping
+- Data validation and error flagging
+- Engine prioritization by RUL
+- Write tests in tests/test_cdh.py
+- Test with CMAPSS CSV and a manually created JSON file
+
+### Phase 3: Preprocessing
+- Build preprocess.py as a deterministic script
+- Dynamic sensor detection (not hardcoded)
+- Normalize, label, save to data/processed/
+- Write tests in tests/test_preprocess.py
+- Test with all four CMAPSS datasets
+
+### Phase 4: CNN-LSTM Model
+- Build models/cnn_lstm.py (architecture)
+- Build models/train.py (training script)
+- Train on FD001, save weights to models/saved/
+- Target RMSE: 13-16 cycles
+- Verify model loads and runs inference
+
+### Phase 5: Tools
+- Build all four tool files
+- Test every function individually
 - Write tests in tests/test_tools.py
-- Test with actual dataset data (configurable via dataset_id)
-
-### Phase 3: CNN-LSTM Model
-- Build models/cnn_lstm.py (architecture definition) — n_features read from dataset config
-- Build models/train.py (training script) — accepts --dataset CLI arg (default FD001)
-- Train per dataset, save weights to models/saved/cnn_lstm_{dataset_id}.pt
-- build_model(dataset_id) reads n_features from config.yaml data.datasets.<id>.n_features
-- Target RMSE: ~13-16 cycles (FD001), may vary for other datasets
-- Verify model loads and runs inference correctly per dataset
-
-### Phase 4: Tools — Stream + Predict
-- Build tools/stream_tools.py (stream_sensors)
-- Build tools/predict_tools.py (predict_rul, check_thresholds)
-- These tools wrap the model for inference
-- Test end-to-end: raw data → clean → stream → predict → RUL output
-
-### Phase 5: Tools — Diagnostic + Advisor
-- Build tools/diagnostic_tools.py (compare_to_fleet, sensor_trends, degradation_rate)
-- Build tools/advisor_tools.py (time_to_critical, recommend_action, generate_report)
-- recommend_action is the only function that calls the Gemini API
-- generate_report creates a real PDF using ReportLab
-- Test each function individually
+- Full pipeline test: raw data → CDH → preprocess → stream → predict → RUL output
 
 ### Phase 6: Agents + Crew
-- Build agents/data_engineer.py, monitor.py, diagnostician.py, advisor.py
-- Each agent gets: role, goal, backstory, tools list, LLM config
-- Build crews/maintenance_crew.py — wires all agents into a sequential Crew
-- Test the full crew pipeline: crew.kickoff() runs all 4 agents in order
-- Verify output makes sense end-to-end
+- Build all three agents
+- Build crews/maintenance_crew.py
+- Test crew.kickoff() end to end
+- Verify output makes sense
 
 ### Phase 7: FastAPI
 - Build api/main.py
-- Endpoints:
-  - POST /analyze — triggers the full crew pipeline for a given engine
-  - GET /health — health check
-  - GET /engines — list all engines in the dataset
-  - GET /engine/{id}/status — get latest prediction for one engine
-- Test with curl or Swagger UI
+- Test all endpoints with Swagger UI at /docs
 
-### Phase 8: Dashboard
-- Next.js 16 app with shadcn/ui, Tailwind CSS, and Recharts
-- Views: Home, Fleet Overview, Engine Detail, Agents, Recommendations, Settings
-- Dataset selector dropdown — switch between FD001–FD004 on the fly
-- Fleet Overview: all engines with RUL predictions colored by severity (healthy/watch/critical)
-- Engine Detail: RUL timeline, sensor trend charts, agent diagnostics, deep AI analysis
-- Deep analysis button runs direct CNN-LSTM prediction + diagnostics (not the full crew)
-- Dynamic sensor handling: 14 sensors for FD001/FD003, 16 for FD002/FD004
+### Phase 8: Integration + Docker
+- Verify full pipeline works end to end
+- Ensure Docker container runs the full stack
+- Deploy to Railway for a shareable demo URL
+
+### Phase 9: README + Demo
+- Add architecture diagram screenshot
+- Add dashboard screenshot
+- Add working quickstart instructions
+- Add API documentation
+- Record Loom walkthrough
 
 ## Rules — Never Do These
+- Do not build a Plotly Dash or any Python frontend. Frontend is React/TypeScript only.
+- Do not create a DataEngineerAgent. Data engineering is handled by preprocess.py.
 - Do not skip phases. Build and test each phase before moving to the next.
 - Do not write functions longer than 30 lines.
 - Do not use vague variable names like x, df2, temp, data1.
-- Do not bleed responsibilities between files. Tools do computation. Agents orchestrate.
 - Do not hardcode values. Everything configurable goes in config.yaml.
 - Do not store API keys in code. Use .env and python-dotenv.
 - Do not install packages without adding them to requirements.txt.
-- Do not write code without docstrings on every function.
-- Do not use print() for logging. Use Python's logging module.
+- Do not use print() for logging. Use Python logging module.
 - Do not catch generic exceptions. Catch specific ones.
+- Do not bleed responsibilities between layers. CDH validates. preprocess cleans. Tools compute. Agents orchestrate.
 
 ## Rules — Always Do These
 - Always read config.yaml for any configurable value.
 - Always type hint every function parameter and return value.
-- Always write a docstring for every function explaining what it does, parameters, and returns.
+- Always write a docstring for every function.
 - Always validate inputs at the start of every function.
-- Always use pathlib.Path for file paths, never string concatenation.
+- Always use pathlib.Path for file paths.
 - Always use logging.getLogger(__name__) for logging.
 - Always test after completing each phase before moving on.
-- Always commit after each phase with a descriptive message.
 
 ## Git Rules
 - Never run git push, git commit, or git add automatically.
@@ -290,5 +335,4 @@ crew = Crew(
 - All version control decisions are made by the architect only.
 
 ## Current Phase
-Phase 8 COMPLETE — All phases built and verified.
-Multi-dataset support (FD001–FD004) COMPLETE — config, tools, models, agents, crew, API, and frontend all support FD001–FD004. All 4 CNN-LSTM models trained and saved.
+Phase 1 — Project Setup

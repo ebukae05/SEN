@@ -1,135 +1,136 @@
-# SEN — Sensor Engine Network Configuration
-# All configurable values live here. Never hardcode these in source files.
+# SEN — Configuration
+# All configurable values for the SEN platform.
+# Code must read from this file, never hardcode.
 
-# ── Data ──────────────────────────────────────────────────────────────────────
+paths:
+  data_raw: data/raw
+  data_processed: data/processed
+  models_saved: models/saved
+  outputs_reports: outputs/reports
+  logs: logs
+
 data:
-  raw_dir: data/raw
-  processed_dir: data/processed
-  active_dataset: FD001   # default dataset; overridable by API/CLI param
-
-  # Shared 26-column CMAPSS schema (identical across FD001–FD004)
-  columns:
-    - unit_id
-    - cycle
-    - op1
-    - op2
-    - op3
-    - s1
-    - s2
-    - s3
-    - s4
-    - s5
-    - s6
-    - s7
-    - s8
-    - s9
-    - s10
-    - s11
-    - s12
-    - s13
-    - s14
-    - s15
-    - s16
-    - s17
-    - s18
-    - s19
-    - s20
-    - s21
-
-  # Per-dataset configuration (sensors differ by operating conditions)
+  active_dataset: FD001
   datasets:
     FD001:
-      train_file: train_FD001.txt
-      test_file: test_FD001.txt
-      rul_file: RUL_FD001.txt
-      fault_modes: 1          # HPC degradation
-      operating_conditions: 1
-      drop_sensors: [s1, s5, s6, s10, s16, s18, s19]
-      keep_sensors: [s2, s3, s4, s7, s8, s9, s11, s12, s13, s14, s15, s17, s20, s21]
-      n_features: 14
-
+      train: train_FD001.txt
+      test: test_FD001.txt
+      rul: RUL_FD001.txt
     FD002:
-      train_file: train_FD002.txt
-      test_file: test_FD002.txt
-      rul_file: RUL_FD002.txt
-      fault_modes: 1          # HPC degradation
-      operating_conditions: 6
-      drop_sensors: [s1, s5, s16, s18, s19]
-      keep_sensors: [s2, s3, s4, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s17, s20, s21]
-      n_features: 16
-
+      train: train_FD002.txt
+      test: test_FD002.txt
+      rul: RUL_FD002.txt
     FD003:
-      train_file: train_FD003.txt
-      test_file: test_FD003.txt
-      rul_file: RUL_FD003.txt
-      fault_modes: 2          # HPC + Fan degradation
-      operating_conditions: 1
-      drop_sensors: [s1, s5, s6, s10, s16, s18, s19]
-      keep_sensors: [s2, s3, s4, s7, s8, s9, s11, s12, s13, s14, s15, s17, s20, s21]
-      n_features: 14
-
+      train: train_FD003.txt
+      test: test_FD003.txt
+      rul: RUL_FD003.txt
     FD004:
-      train_file: train_FD004.txt
-      test_file: test_FD004.txt
-      rul_file: RUL_FD004.txt
-      fault_modes: 2          # HPC + Fan degradation
-      operating_conditions: 6
-      drop_sensors: [s1, s5, s16, s18, s19]
-      keep_sensors: [s2, s3, s4, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s17, s20, s21]
-      n_features: 16
+      train: train_FD004.txt
+      test: test_FD004.txt
+      rul: RUL_FD004.txt
+  schema:
+    columns:
+      - unit_id
+      - cycle
+      - op1
+      - op2
+      - op3
+      - s1
+      - s2
+      - s3
+      - s4
+      - s5
+      - s6
+      - s7
+      - s8
+      - s9
+      - s10
+      - s11
+      - s12
+      - s13
+      - s14
+      - s15
+      - s16
+      - s17
+      - s18
+      - s19
+      - s20
+      - s21
+    id_column: unit_id
+    cycle_column: cycle
+    op_columns:
+      - op1
+      - op2
+      - op3
+    sensor_prefix: s
+    sensor_count: 21
+  processed_filename: "train_{dataset_id}_clean.csv"
+  scaler_filename: "scaler_{dataset_id}.pkl"
 
-# ── RUL Labeling ──────────────────────────────────────────────────────────────
-rul:
-  cap: 130  # Piecewise linear RUL cap (cycles)
+preprocessing:
+  rul_cap: 130
+  scaler: minmax
+  normalize_range: [0, 1]
+  constant_sensor_variance_threshold: 1.0e-6
+  expected_sensor_count_after_drop: 14
 
-# ── Model ─────────────────────────────────────────────────────────────────────
+cdh:
+  supported_formats:
+    - csv
+    - json
+    - xlsx
+  required_columns:
+    - unit_id
+    - cycle
+  out_of_range:
+    min: -1000.0
+    max: 10000.0
+  prioritize_by: rul_ascending
+
 model:
-  sequence_length: 30       # Sliding window size (cycles)
-  conv_filters: 64          # CNN Conv1D filter count
-  conv_kernel_size: 3       # CNN Conv1D kernel size
-  pool_size: 2              # MaxPool1D pool size
-  lstm_units: 50            # LSTM hidden units
-  dropout_rate: 0.3
-  dense_output: 1           # Single RUL output
+  sequence_length: 30
+  n_features: 14
+  conv_filters: 64
+  conv_kernel: 3
+  pool_size: 2
+  lstm_units: 50
+  lstm_layers: 2
+  dropout: 0.3
+  dense_units: 1
+  weights_filename: "cnn_lstm_{dataset_id}.pt"
 
-  training:
-    epochs: 50
-    batch_size: 32
-    learning_rate: 0.001
-    loss: mse
+training:
+  loss: MSELoss
+  optimizer: Adam
+  learning_rate: 0.001
+  epochs: 50
+  batch_size: 32
+  validation_split: 0.2
+  target_rmse_min: 13
+  target_rmse_max: 16
+  random_seed: 42
 
-  saved_dir: models/saved
+monitoring:
+  window_size: 30
+  rul_alert_threshold: 50
+  severity:
+    critical_below: 30
+    watch_below: 80
 
-  # Per-dataset model weights (n_features read from data.datasets.<id>.n_features)
-  weights_files:
-    FD001: cnn_lstm_fd001.pt
-    FD002: cnn_lstm_fd002.pt
-    FD003: cnn_lstm_fd003.pt
-    FD004: cnn_lstm_fd004.pt
-
-# ── Monitoring ────────────────────────────────────────────────────────────────
-monitor:
-  rul_alert_threshold: 50   # Flag engines with RUL below this (cycles)
-
-# ── LLM ───────────────────────────────────────────────────────────────────────
 llm:
   provider: google
-  model: gemini/gemini-2.5-flash-lite
-  temperature: 0.3
+  model: gemini-2.5-flash
+  temperature: 0.7
+  max_output_tokens: 1024
+  api_key_env: GOOGLE_API_KEY
 
-# ── API ───────────────────────────────────────────────────────────────────────
 api:
   host: 0.0.0.0
   port: 8000
-  reload: true
+  cors_origins:
+    - "*"
 
-# ── Dashboard ─────────────────────────────────────────────────────────────────
-dashboard:
-  host: 0.0.0.0
-  port: 8050
-  debug: true
-
-# ── Logging ───────────────────────────────────────────────────────────────────
 logging:
   level: INFO
-  format: "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  datefmt: "%Y-%m-%d %H:%M:%S"

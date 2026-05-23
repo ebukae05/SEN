@@ -45,10 +45,9 @@ logs/
 # ReportLab output
 *.pdf
 
-# Node
-node_modules/
-.next/
-frontend_old_vite/
+# Generated outputs
+outputs/reports/
+data/processed/
 
 # Claude
 .claude/
