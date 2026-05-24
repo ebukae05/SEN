@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0f1419;
+  --foreground: #e7e9ea;
+  --card: #16202a;
+  --card-foreground: #e7e9ea;
+  --popover: #16202a;
+  --popover-foreground: #e7e9ea;
+  --primary: #f59e0b;
+  --primary-foreground: #0f1419;
+  --secondary: #1e2a36;
+  --secondary-foreground: #e7e9ea;
+  --muted: #1e2a36;
+  --muted-foreground: #8b98a5;
+  --accent: #f59e0b;
+  --accent-foreground: #0f1419;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #2f3b47;
+  --input: #2f3b47;
+  --ring: #f59e0b;
+  --radius: 0.5rem;
+  
+  /* Severity colors */
+  --healthy: #22c55e;
+  --watch: #f59e0b;
+  --critical: #ef4444;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-healthy: var(--healthy);
+  --color-watch: var(--watch);
+  --color-critical: var(--critical);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
