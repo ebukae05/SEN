@@ -38,7 +38,8 @@
       "Bash(curl -s \"http://localhost:8000/fleet?dataset=FD004\")",
       "Bash(C:/SEN/venv/Scripts/python.exe -c \"import crewai, langchain_google_genai, torch, fastapi, reportlab, yaml, dotenv; print\\('crewai', crewai.__version__\\); print\\('all imports ok'\\)\")",
       "Bash(C:/SEN/venv/Scripts/python.exe *)",
-      "Bash(C:/SEN/venv/Scripts/pip.exe install *)"
+      "Bash(C:/SEN/venv/Scripts/pip.exe install *)",
+      "Bash(tee /tmp/sen_train_fd001.log)"
     ]
   }
 }
