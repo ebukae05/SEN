@@ -42,7 +42,16 @@
       "Bash(tee /tmp/sen_train_fd001.log)",
       "Bash(RUN_LIVE_CREW=1 venv/Scripts/python.exe -m pytest tests/test_agents.py::TestCrewKickoff -v --tb=short)",
       "Bash(RUN_LIVE_CREW=1 PYTHONIOENCODING=utf-8 venv/Scripts/python.exe -m pytest tests/test_agents.py::TestCrewKickoff -v)",
-      "Bash(venv/Scripts/python.exe -m pytest tests/ -v --tb=short)"
+      "Bash(venv/Scripts/python.exe -m pytest tests/ -v --tb=short)",
+      "Bash(venv/Scripts/python.exe *)",
+      "Bash(curl -sS http://127.0.0.1:8001/health)",
+      "Bash(curl -sS -o /dev/null -w \"openapi=%{http_code} docs=\" http://127.0.0.1:8001/openapi.json)",
+      "Bash(curl -sS -o /dev/null -w \"%{http_code}\\\\n\" http://127.0.0.1:8001/docs)",
+      "Bash(curl -sS http://127.0.0.1:8001/engines)",
+      "Bash(curl -sS http://127.0.0.1:8001/engine/1/status)",
+      "Bash(curl -sS -X POST http://127.0.0.1:8001/analyze -H \"Content-Type: application/json\" -d '{\"engine_id\": 0}' -w \"\\\\nstatus=%{http_code}\\\\n\")",
+      "Bash(curl -sS -X POST http://127.0.0.1:8001/analyze -H \"Content-Type: application/json\" -d '{\"engine_id\": 999999}' -w \"\\\\nstatus=%{http_code}\\\\n\")",
+      "Bash(kill %1)"
     ]
   }
 }
