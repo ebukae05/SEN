@@ -1,6 +1,7 @@
 """FastAPI backend exposing the SEN pipeline over REST.
 
 Endpoints:
+    GET  /                        -> service info + endpoint index
     GET  /health                  -> service liveness probe
     GET  /engines                 -> list of engine_ids in the active dataset
     GET  /engine/{engine_id}/status -> latest RUL + alert status
@@ -66,6 +67,23 @@ def _build_app() -> FastAPI:
 
 
 app = _build_app()
+
+
+@app.get("/")
+def root() -> dict[str, object]:
+    """Service info + endpoint index for casual visitors."""
+    return {
+        "name": "SEN — Sensor Engine Network",
+        "version": "1.0.0",
+        "description": "Real-time predictive maintenance API for turbofan engines.",
+        "docs": "/docs",
+        "endpoints": {
+            "health": "/health",
+            "engines": "/engines",
+            "engine_status": "/engine/{engine_id}/status",
+            "analyze": "POST /analyze",
+        },
+    }
 
 
 @app.get("/health")
