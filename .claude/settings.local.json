@@ -39,7 +39,10 @@
       "Bash(C:/SEN/venv/Scripts/python.exe -c \"import crewai, langchain_google_genai, torch, fastapi, reportlab, yaml, dotenv; print\\('crewai', crewai.__version__\\); print\\('all imports ok'\\)\")",
       "Bash(C:/SEN/venv/Scripts/python.exe *)",
       "Bash(C:/SEN/venv/Scripts/pip.exe install *)",
-      "Bash(tee /tmp/sen_train_fd001.log)"
+      "Bash(tee /tmp/sen_train_fd001.log)",
+      "Bash(RUN_LIVE_CREW=1 venv/Scripts/python.exe -m pytest tests/test_agents.py::TestCrewKickoff -v --tb=short)",
+      "Bash(RUN_LIVE_CREW=1 PYTHONIOENCODING=utf-8 venv/Scripts/python.exe -m pytest tests/test_agents.py::TestCrewKickoff -v)",
+      "Bash(venv/Scripts/python.exe -m pytest tests/ -v --tb=short)"
     ]
   }
 }
