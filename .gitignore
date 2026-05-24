@@ -17,10 +17,6 @@ venv/
 .venv/
 env/
 
-# Model weights (large binary files)
-models/saved/*.pt
-models/saved/*.pth
-
 # Processed data (generated, not source-controlled)
 data/processed/
 
