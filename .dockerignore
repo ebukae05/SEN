@@ -1,0 +1,46 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Virtual envs and caches
+venv
+.venv
+env
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Editor / IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets — provided at runtime via env vars, never baked into the image
+.env
+
+# Local-only generated artifacts (rebuilt at image build time)
+data/processed
+outputs/reports
+logs
+
+# Notebooks and docs aren't needed at runtime
+notebooks
+docs
+README.md
+
+# Tests aren't shipped to the runtime image
+tests
+
+# Claude / agent metadata
+.claude
+.cursorrules
