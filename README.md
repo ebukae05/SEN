@@ -1,316 +1,275 @@
 # SEN — Sensor Engine Network
 
-Real-time turbofan engine health monitoring system powered by a 4-agent AI pipeline, CNN-LSTM deep learning, and Gemini AI.
+Real-time predictive maintenance platform for rotating machinery. SEN ingests
+time-series sensor data, predicts Remaining Useful Life (RUL) with a CNN-LSTM,
+runs a CrewAI multi-agent diagnostic pipeline, and generates maintenance
+recommendations plus PDF reports — all behind a FastAPI backend.
+
+**Live API:** [`https://sen-production.up.railway.app`](https://sen-production.up.railway.app)
+**Interactive docs:** [`/docs`](https://sen-production.up.railway.app/docs)
 
 ---
 
-## What It Does
+## What it does
 
-SEN ingests NASA CMAPSS sensor data from up to 260 turbofan engines across 4 datasets (FD001–FD004), predicts Remaining Useful Life (RUL) using per-dataset CNN-LSTM models, runs a multi-agent diagnostic pipeline, and delivers maintenance recommendations with generated PDF reports — all surfaced through a REST API and a Next.js dashboard with a live dataset selector.
+1. Accepts raw sensor data in CSV, JSON, or Excel format through a CDH
+   (Command & Data Handling) layer modeled on spacecraft data systems
+2. Deterministic preprocessing — drops constant sensors, normalizes with
+   MinMaxScaler, generates piecewise-linear RUL labels
+3. Predicts RUL per engine using a per-dataset CNN-LSTM trained on NASA
+   CMAPSS turbofan degradation data (FD001–FD004)
+4. Three-agent CrewAI pipeline investigates flagged engines:
+   - **MonitorAgent** — streams sensor windows, predicts RUL, raises alerts
+   - **DiagnosticAgent** — compares to fleet, ranks declining sensors,
+     measures degradation rate
+   - **MaintenanceAdvisorAgent** — estimates time-to-critical, asks Gemini
+     for a recommendation, generates a PDF report
+5. Exposes everything over a REST API consumable from any frontend
+
+Although the demo runs on aircraft turbofan data, the CDH layer's schema
+adapter makes SEN sensor-agnostic — wind turbines, pumps, naval engines,
+manufacturing equipment all fit the same pipeline with retraining.
 
 ---
 
 ## Architecture
 
 ```
-Raw Sensor Data (NASA CMAPSS FD001–FD004)
+Raw sensor data (CSV / JSON / Excel)
+        |
+        v
+   CDH Layer  (validate, prioritize, normalize format)
+        |
+        v
+   preprocess.py  (clean, scale, label — deterministic)
         |
         v
 +-------------------------------------------------+
-|           4-Agent Sequential Pipeline            |
+|       3-Agent Sequential CrewAI Pipeline         |
 |                                                  |
-|  DataEngineerAgent -> MonitorAgent               |
-|      -> DiagnosticAgent -> MaintenanceAdvisor    |
+|  MonitorAgent  ->  DiagnosticAgent  ->  Advisor  |
+|     (PyTorch)        (SciPy/Pandas)    (Gemini)  |
 +-------------------------------------------------+
         |
         v
-  PDF Report + Maintenance Recommendation
+   FastAPI  (Railway)
         |
-        +-- FastAPI REST Layer  (port 8000)
-        +-- Next.js Dashboard   (port 3000)
+        +--> JSON responses
+        +--> PDF maintenance reports
+        +--> Frontend dashboard (v0.dev / Next.js)
 ```
 
-### CNN-LSTM Model
+### CNN-LSTM model
 
 ```
-Input (30 cycles x 14 or 16 sensors)
--> Conv1D(64, kernel=3, ReLU)
--> Conv1D(64, kernel=3, ReLU)
--> MaxPooling1D(2)
--> LSTM(50, return_sequences=True)
--> Dropout(0.3)
--> LSTM(50)
--> Dropout(0.3)
--> Dense(1) -> Predicted RUL
+Input (30 cycles x 14 sensors)
+  -> Conv1D(64, kernel=3, ReLU)
+  -> Conv1D(64, kernel=3, ReLU)
+  -> MaxPooling1D(2)
+  -> LSTM(50, return_sequences=True)
+  -> Dropout(0.3)
+  -> LSTM(50)
+  -> Dropout(0.3)
+  -> Dense(1) -> Predicted RUL
 ```
 
-One model trained per dataset. Feature count varies: 14 sensors for FD001/FD003 (1 operating condition), 16 sensors for FD002/FD004 (6 operating conditions).
-
-### Agent Pipeline
-
-| Agent | Role | Tools |
-|-------|------|-------|
-| DataEngineerAgent | Ingest, clean, label sensor data | load_dataset, clean_data, generate_rul_labels, visualize_trends |
-| MonitorAgent | Stream data, predict RUL, flag alerts | stream_sensors, predict_rul, check_thresholds |
-| DiagnosticAgent | Root cause analysis, fleet comparison | compare_to_fleet, sensor_trends, degradation_rate |
-| MaintenanceAdvisorAgent | Recommendations + PDF reports | time_to_critical, recommend_action, generate_report |
-
-All tools accept a `dataset_id` parameter (FD001–FD004) so the entire pipeline is dataset-aware.
-
----
-
-## Datasets
-
-SEN supports all four NASA CMAPSS turbofan degradation simulation sub-datasets:
-
-| Dataset | Engines | Operating Conditions | Fault Modes | Sensors Used |
-|---------|---------|---------------------|-------------|--------------|
-| FD001   | 100     | 1 (sea level)       | 1 — HPC degradation       | 14 |
-| FD002   | 260     | 6                   | 1 — HPC degradation       | 16 |
-| FD003   | 100     | 1 (sea level)       | 2 — HPC + fan degradation | 14 |
-| FD004   | 249     | 6                   | 2 — HPC + fan degradation | 16 |
-
-Switch datasets from the dashboard dropdown or via the `?dataset=FD002` query parameter on any API endpoint.
+One model per dataset (FD001–FD004). MSE loss, Adam (lr=0.001), 50 epochs,
+batch size 32, RUL capped at 130 cycles (piecewise linear labeling).
 
 ---
 
 ## Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Agent orchestration | CrewAI |
-| LLM | Google Gemini 2.5 Flash Lite |
-| Deep learning | PyTorch (CNN-LSTM) |
-| REST API | FastAPI |
-| Dashboard | Next.js 16, shadcn/ui, Tailwind CSS, Recharts |
-| Data | Pandas, NumPy, scikit-learn, SciPy |
-| Reports | ReportLab |
-| Dataset | NASA CMAPSS FD001–FD004 |
-| Deployment | Docker, Docker Compose |
+| Layer              | Technology                                    |
+|--------------------|-----------------------------------------------|
+| Agent orchestration| CrewAI (sequential process, context chaining) |
+| LLM                | Google Gemini 2.5 Flash (langchain-google-genai) |
+| Deep learning      | PyTorch (CPU build for deploy)                |
+| REST API           | FastAPI + Uvicorn                             |
+| Data               | Pandas, NumPy, scikit-learn, SciPy            |
+| Reports            | ReportLab (PDF)                               |
+| Config / secrets   | YAML + python-dotenv                          |
+| Testing            | Pytest                                        |
+| Container          | Docker + Docker Compose                       |
+| Hosting            | Railway                                       |
+| Dataset            | NASA CMAPSS FD001–FD004                       |
 
 ---
 
-## Project Structure
+## API
+
+All endpoints live at `https://sen-production.up.railway.app`.
+
+| Method | Endpoint                    | Description                                      |
+|--------|-----------------------------|--------------------------------------------------|
+| GET    | `/`                         | Service info + endpoint index                    |
+| GET    | `/health`                   | Liveness probe                                   |
+| GET    | `/engines`                  | List of engine IDs in the active dataset         |
+| GET    | `/engine/{engine_id}/status`| Latest RUL prediction + severity + alert state   |
+| POST   | `/analyze`                  | Run the full 3-agent crew on one engine          |
+
+`POST /analyze` body:
+
+```json
+{ "engine_id": 1 }
+```
+
+`POST /analyze` response (truncated):
+
+```json
+{
+  "engine_id": 1,
+  "result": "MonitorAgent: engine 1 RUL = 4.24 cycles, CRITICAL...\nDiagnosticAgent: ..."
+}
+```
+
+Expect ~30–60 seconds — it kicks off a sequential CrewAI pipeline with three
+LLM calls. Interactive Swagger UI at [`/docs`](https://sen-production.up.railway.app/docs)
+lets you try every endpoint from the browser.
+
+---
+
+## Datasets
+
+NASA CMAPSS turbofan engine degradation simulation — 4 sub-datasets:
+
+| Dataset | Engines | Operating conditions | Fault modes              |
+|---------|---------|----------------------|--------------------------|
+| FD001   | 100     | 1 (sea level)        | HPC degradation          |
+| FD002   | 260     | 6                    | HPC degradation          |
+| FD003   | 100     | 1 (sea level)        | HPC + fan degradation    |
+| FD004   | 249     | 6                    | HPC + fan degradation    |
+
+All four share the same 21 sensor columns. Constant sensors are detected
+dynamically per dataset — 14 sensors are kept after dropping near-constants.
+
+Source: [NASA Prognostics Center of Excellence](https://www.nasa.gov/intelligent-systems-division/discovery-and-systems-health/pcoe/pcoe-data-set-repository/)
+
+---
+
+## Project structure
 
 ```
 SEN/
 ├── config.yaml              # All configurable values
-├── docker-compose.yml       # One-command deployment
-├── Dockerfile.api           # Python API container
+├── Dockerfile               # Single-stage CPU image for Railway
+├── docker-compose.yml       # Local one-command run
+├── requirements.txt
+├── preprocess.py            # Deterministic preprocessing
+│
+├── cdh/handler.py           # Command & Data Handling layer
+├── tools/                   # Agent-callable Python functions
+│   ├── stream_tools.py
+│   ├── predict_tools.py
+│   ├── diagnostic_tools.py
+│   └── advisor_tools.py
 ├── agents/                  # CrewAI agent definitions
-├── crews/                   # Pipeline crew orchestration
-├── tools/                   # Ingest, predict, diagnostic, advisor tools
-├── models/                  # CNN-LSTM architecture + training script
-├── api/                     # FastAPI endpoints
-├── frontend/                # Next.js dashboard
-│   ├── Dockerfile           # Frontend container
-│   ├── app/                 # Next.js app router
-│   ├── components/
-│   │   ├── views/           # Fleet, Engine Detail, Agents, Recommendations, Home
-│   │   └── ui/              # shadcn/ui component library
-│   └── lib/                 # API client, engine utilities
-├── data/raw/                # NASA CMAPSS FD001–FD004 raw files (12 files)
-├── data/processed/          # Per-dataset clean CSVs and scalers
-└── tests/                   # Phase verification tests
+│   ├── monitor.py
+│   ├── diagnostician.py
+│   └── advisor.py
+├── crews/maintenance_crew.py
+├── models/
+│   ├── cnn_lstm.py          # Model architecture
+│   ├── train.py             # Training script
+│   └── saved/               # Trained .pt weights (one per dataset)
+├── api/main.py              # FastAPI app
+│
+├── data/raw/                # CMAPSS FD001–FD004 raw files
+├── data/processed/          # Cleaned CSVs + scalers (generated)
+├── outputs/reports/         # Generated PDF reports
+└── tests/                   # Phase verification suite
 ```
 
 ---
 
-## Quick Start (Docker)
+## Quickstart (Docker)
 
-The fastest way to run SEN on any platform. Requires [Docker](https://docs.docker.com/get-docker/).
+Requires [Docker](https://docs.docker.com/get-docker/) and a free
+[Gemini API key](https://aistudio.google.com/app/apikey).
 
 ```bash
 git clone https://github.com/ebukae05/SEN.git
 cd SEN
-```
-
-Create a `.env` file with your Gemini API key:
-
-```bash
 echo "GOOGLE_API_KEY=your_key_here" > .env
-```
-
-Get a free key at [aistudio.google.com](https://aistudio.google.com/app/apikey).
-
-Build and run:
-
-```bash
 docker compose up --build
 ```
 
-On first launch, the API container automatically processes the raw data and trains the CNN-LSTM model (~5 minutes). Subsequent starts are instant.
+First build runs `preprocess.py --all` to bake all four processed datasets +
+scalers into the image (~2 minutes). Subsequent starts are instant.
 
-Open [http://localhost:3000](http://localhost:3000) for the dashboard, [http://localhost:8000/docs](http://localhost:8000/docs) for the API.
+API: [http://localhost:8000](http://localhost:8000)
+Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 
-To stop:
-
-```bash
-docker compose down
-```
+Stop with `docker compose down`.
 
 ---
 
-## Manual Setup
+## Manual setup
 
-### Prerequisites
-
-- Python 3.10+
-- Node.js 18+
-- Git
-
-### 1. Clone and set up the backend
-
-```bash
-git clone https://github.com/ebukae05/SEN.git
-cd SEN
-```
-
-Create a virtual environment:
-
-**macOS / Linux:**
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-**Windows:**
 ```bash
 python -m venv venv
-venv\Scripts\activate
-```
-
-Install dependencies:
-
-```bash
+source venv/bin/activate              # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-```
+echo "GOOGLE_API_KEY=your_key_here" > .env
 
-### 2. Add your API key
-
-Create a `.env` file in the project root:
-
-```
-GOOGLE_API_KEY=your_key_here
-```
-
-Get a free key at [aistudio.google.com](https://aistudio.google.com/app/apikey).
-
-### 3. Prepare data and train models
-
-Process and train for each dataset you want to use. FD001 is the default. Repeat for FD002, FD003, FD004 as needed.
-
-```bash
-python -c "
-from tools.ingest_tools import load_dataset, clean_data, generate_rul_labels
-import yaml, pathlib
-dataset_id = 'FD001'  # change to FD002, FD003, or FD004
-cfg = yaml.safe_load(open('config.yaml'))
-df = load_dataset('train', dataset_id=dataset_id)
-df = clean_data(df, dataset_id=dataset_id)
-df = generate_rul_labels(df)
-out = pathlib.Path(cfg['data']['processed_dir'])
-out.mkdir(parents=True, exist_ok=True)
-df.to_csv(out / f'train_{dataset_id}_clean.csv', index=False)
-print(f'Saved {len(df)} rows for {dataset_id}')
-"
-```
-
-Then train the model (~2-5 minutes per dataset):
-
-```bash
+python preprocess.py --all            # generates data/processed/
 python models/train.py --dataset FD001
 python models/train.py --dataset FD002
 python models/train.py --dataset FD003
 python models/train.py --dataset FD004
-```
 
-### 4. Start the API
-
-```bash
 uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
+---
 
-### 5. Start the dashboard
-
-Open a second terminal:
+## Testing
 
 ```bash
-cd frontend
-npm install
-npm run dev
+pytest                                # ~40 tests across all phases
+RUN_LIVE_CREW=1 pytest                # also runs the live Gemini crew tests
 ```
 
-Dashboard: [http://localhost:3000](http://localhost:3000)
+Live crew tests are gated behind `RUN_LIVE_CREW=1` because they consume the
+Gemini free-tier quota (5 RPM, 20/day on gemini-2.5-flash).
+
+| Phase | Coverage                            |
+|-------|-------------------------------------|
+| 2     | CDH layer — validation, schema adapter, prioritization |
+| 3     | preprocess.py — dynamic sensor detection, normalization, RUL labels |
+| 4     | CNN-LSTM — architecture + inference |
+| 5     | Tools — stream, predict, diagnostic, advisor |
+| 6     | Agents + Crew wiring                |
+| 7     | FastAPI endpoints                   |
 
 ---
 
-## Dashboard Views
+## Dashboard
 
-- **Home** — System overview and quick status summary
-- **Fleet Overview** — All engines in the selected dataset with RUL predictions colored by severity
-- **Engine Detail** — RUL timeline, sensor trends, and deep AI analysis for any engine
-- **Agents** — Activity log from the 4-agent pipeline
-- **Recommendations** — Maintenance actions with confidence scores and contributing factors
+The frontend dashboard is built separately in [v0.dev](https://v0.dev) — a
+Next.js + Tailwind + shadcn/ui app that consumes the REST API. The deployed
+backend has CORS open, so any frontend can hit it.
 
-A dataset selector dropdown at the top of the dashboard lets you switch between FD001–FD004 on the fly.
+Dashboard URL: _(to be added once deployed)_
 
----
-
-## API Endpoints
-
-All data endpoints accept an optional `?dataset=FD001` query parameter (default: FD001).
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/health` | Liveness check |
-| GET | `/datasets` | List all available CMAPSS datasets with metadata |
-| GET | `/engines` | List all engine IDs in the selected dataset |
-| GET | `/engine/{id}/status` | RUL + severity for one engine |
-| GET | `/engine/{id}/sensors` | Normalized sensor history (dynamic sensor count) |
-| GET | `/fleet` | Health snapshot for all engines |
-| POST | `/analyze` | Deep analysis: RUL prediction, diagnostics, Gemini recommendation, PDF report |
-| POST | `/api/chat` | Chat with Gemini about engine data |
+Panels:
+- Fleet health summary — totals, severity counts, average RUL, active alerts
+- Fleet overview grid — all engines color-coded by status, sortable by urgency
+- Engine detail — RUL countdown, severity, deep analysis trigger
+- Agent activity log — output from the 3-agent crew
+- Maintenance recommendations — latest action items with severity badges
 
 ---
 
-## Deep Analysis
+## Deployment
 
-Click "Run Deeper Analysis" on any engine detail page. The system:
-
-1. Predicts RUL using the CNN-LSTM model
-2. Checks alert thresholds
-3. Compares the engine to fleet averages
-4. Identifies the top 3 declining sensors
-5. Calculates degradation rate vs fleet
-6. Estimates time to critical failure
-7. Generates a Gemini-powered maintenance recommendation
-8. Produces a PDF report
-
-Completes in ~10 seconds (single Gemini API call).
+Production runs on [Railway](https://railway.app) — auto-deploys on push
+to `main`. The Dockerfile uses a CPU-only PyTorch build to keep the image
+under Railway's free-tier limit. The container honors Railway's dynamic
+`$PORT` and falls back to `8000` locally.
 
 ---
 
-## Test Results
+## Repository
 
-| Phase | Test | Result |
-|-------|------|--------|
-| 2 | Ingest tools | 5/5 |
-| 4 | Stream + predict tools | 5/5 |
-| 5 | Diagnostic + advisor tools | 4/4 |
-| 6 | Full agent pipeline | 2/2 |
-| 7 | FastAPI endpoints | 4/4 |
-| 8 | Dashboard structure | 4/4 |
-
----
-
-## Dataset
-
-NASA CMAPSS — [Turbofan Engine Degradation Simulation Data Set](https://www.nasa.gov/intelligent-systems-division/discovery-and-systems-health/pcoe/pcoe-data-set-repository/)
-
-- 4 sub-datasets (FD001–FD004), 100–260 engines each
-- 21 sensor channels per dataset; 14 or 16 kept after dropping near-constant sensors
-- 1–6 operating conditions, 1–2 fault modes (HPC degradation, fan degradation)
-- RUL capped at 130 cycles (piecewise linear labeling)
+[github.com/ebukae05/SEN](https://github.com/ebukae05/SEN)
