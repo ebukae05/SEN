@@ -1,5 +1,6 @@
 import { ChevronDown, Filter, Search, TrendingDown } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import type { FleetEngine } from "../lib/types";
 import { cn } from "../lib/cn";
 import { Sparkline } from "./Sparkline";
@@ -119,6 +120,7 @@ function Th({
 }
 
 function FleetRow({ engine: e }: { engine: FleetEngine }) {
+  const navigate = useNavigate();
   const rulColor =
     e.severity === "critical"
       ? "text-status-red"
@@ -132,7 +134,10 @@ function FleetRow({ engine: e }: { engine: FleetEngine }) {
         ? "#F59E0B"
         : "#C084FC";
   return (
-    <tr className="group border-b border-border/40 transition-colors last:border-b-0 hover:bg-violet-soft">
+    <tr
+      onClick={() => navigate(`/engine/${e.engine_id}`)}
+      className="group cursor-pointer border-b border-border/40 transition-colors last:border-b-0 hover:bg-violet-soft"
+    >
       <td className="py-2.5 pl-4">
         <div className="flex items-center gap-2">
           <span className="font-mono text-[13px] text-text">
@@ -180,12 +185,9 @@ function FleetRow({ engine: e }: { engine: FleetEngine }) {
         </span>
       </td>
       <td className="py-2.5 pr-4 text-right">
-        <button
-          type="button"
-          className="rounded-md border border-border bg-surface-2 px-2.5 py-1 text-[11px] text-text-dim opacity-0 transition-opacity hover:border-violet/40 hover:text-violet-glow group-hover:opacity-100"
-        >
+        <span className="inline-block rounded-md border border-border bg-surface-2 px-2.5 py-1 text-[11px] text-text-dim opacity-0 transition-opacity group-hover:border-violet/40 group-hover:text-violet-glow group-hover:opacity-100">
           Analyze →
-        </button>
+        </span>
       </td>
     </tr>
   );

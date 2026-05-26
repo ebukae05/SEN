@@ -9,6 +9,7 @@ import {
   Settings,
   Sparkles,
 } from "lucide-react";
+import { Link, useLocation } from "react-router-dom";
 import { cn } from "../lib/cn";
 
 interface NavItemProps {
@@ -16,19 +17,12 @@ interface NavItemProps {
   label: string;
   active?: boolean;
   badge?: string;
+  to?: string;
 }
 
-function NavItem({ icon: Icon, label, active, badge }: NavItemProps) {
-  return (
-    <button
-      type="button"
-      className={cn(
-        "group relative flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-colors",
-        active
-          ? "bg-surface-hover text-text"
-          : "text-text-dim hover:bg-surface-2 hover:text-text",
-      )}
-    >
+function NavItem({ icon: Icon, label, active, badge, to }: NavItemProps) {
+  const inner = (
+    <>
       {active && (
         <span className="absolute top-1.5 bottom-1.5 -left-2 w-[2px] rounded-r bg-violet-glow shadow-[0_0_8px_rgba(192,132,252,0.7)]" />
       )}
@@ -44,6 +38,21 @@ function NavItem({ icon: Icon, label, active, badge }: NavItemProps) {
           {badge}
         </span>
       )}
+    </>
+  );
+  const classes = cn(
+    "group relative flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-colors",
+    active
+      ? "bg-surface-hover text-text"
+      : "text-text-dim hover:bg-surface-2 hover:text-text",
+  );
+  return to ? (
+    <Link to={to} className={classes}>
+      {inner}
+    </Link>
+  ) : (
+    <button type="button" className={classes}>
+      {inner}
     </button>
   );
 }
@@ -57,9 +66,10 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 }
 
 export function Sidebar() {
+  const { pathname } = useLocation();
   return (
     <aside className="flex h-full w-60 shrink-0 flex-col border-r border-border bg-bg">
-      <div className="flex items-center gap-2.5 px-4 py-4">
+      <Link to="/" className="flex items-center gap-2.5 px-4 py-4">
         <div className="relative flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-violet to-violet-glow shadow-[0_0_12px_rgba(168,85,247,0.5)]">
           <Sparkles className="h-3.5 w-3.5 text-white" />
         </div>
@@ -67,13 +77,13 @@ export function Sidebar() {
           <span className="text-[13px] font-semibold text-text">SEN</span>
           <span className="font-mono text-[10px] text-text-faint">v1.0.0</span>
         </div>
-      </div>
+      </Link>
 
       <nav className="flex-1 overflow-y-auto px-2 pb-4">
-        <NavItem icon={LayoutGrid} label="Overview" active />
+        <NavItem to="/" icon={LayoutGrid} label="Overview" active={pathname === "/"} />
         <NavItem icon={Plane} label="Fleet" />
         <NavItem icon={AlertTriangle} label="Alerts" badge="7" />
-        <NavItem icon={Activity} label="Agents" />
+        <NavItem to="/agents" icon={Activity} label="Agents" active={pathname === "/agents"} />
 
         <SectionLabel>Analysis</SectionLabel>
         <NavItem icon={LineChart} label="Trends" />
@@ -110,8 +120,8 @@ function PinnedEngine({
         ? "bg-status-amber"
         : "bg-status-green";
   return (
-    <button
-      type="button"
+    <Link
+      to={`/engine/${id}`}
       className="group flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-text-dim transition-colors hover:bg-surface-2 hover:text-text"
     >
       <span
@@ -123,6 +133,6 @@ function PinnedEngine({
       />
       <span className="flex-1 text-left">Engine {id}</span>
       <span className="font-mono text-[11px] text-text-faint">{rul}c</span>
-    </button>
+    </Link>
   );
 }
