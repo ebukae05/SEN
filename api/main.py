@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from agents import get_active_dataframe, load_config
+from agents import active_dataset, get_active_dataframe, load_config
 from api.ingestion_routes import router as ingestion_router
 from crews.maintenance_crew import run_pipeline
 from ingestion.heuristic import (
@@ -163,10 +163,21 @@ def engine_status(
 def analyze(
     request: AnalyzeRequest, dataset: str | None = Query(default=None)
 ) -> AnalyzeResponse:
-    """Kick off the full Monitor->Diagnostic->Advisor crew for one engine."""
+    """Kick off the full Monitor->Diagnostic->Advisor crew for one engine.
+
+    The optional `dataset` query parameter routes the run to a specific
+    custom (uploaded) dataset; the agent tools pick it up via the
+    `active_dataset` ContextVar so their no-arg `get_active_dataframe()`
+    calls return the right data.
+    """
     df = _resolve_dataframe(dataset)
     if request.engine_id not in df["unit_id"].values:
         raise HTTPException(404, f"engine_id {request.engine_id} not found")
-    logger.info("API /analyze triggered for engine %d", request.engine_id)
-    result = run_pipeline(request.engine_id)
+    logger.info(
+        "API /analyze triggered for engine %d (dataset=%s)",
+        request.engine_id,
+        dataset or "<default>",
+    )
+    with active_dataset(dataset):
+        result = run_pipeline(request.engine_id)
     return AnalyzeResponse(engine_id=request.engine_id, result=result)

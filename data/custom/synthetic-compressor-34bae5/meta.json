@@ -1,0 +1,22 @@
+{
+  "dataset_id": "synthetic-compressor-34bae5",
+  "asset_id": "synthetic_compressor",
+  "asset_type": "centrifugal_compressor",
+  "industry": "oil_gas",
+  "tenant_id": "default",
+  "source": "custom",
+  "status": "ready",
+  "created_at": "2026-05-26T14:55:12+00:00",
+  "sensor_count": 5,
+  "engine_count": 10,
+  "row_count": 2000,
+  "has_rul": true,
+  "sensor_display_names": {
+    "vibration_x": "vibration_x",
+    "vibration_y": "vibration_y",
+    "temperature_bearing": "temperature_bearing",
+    "pressure_inlet": "pressure_inlet",
+    "rpm_shaft": "rpm_shaft"
+  },
+  "error": null
+}
