@@ -1,19 +1,46 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { FleetSummaryBar } from "../components/FleetSummaryBar";
 import { FleetTable } from "../components/FleetTable";
-import { makeMockFleet } from "../lib/mock";
+import { makeFleetFromIds, makeMockFleet } from "../lib/mock";
 import { useFleetStore } from "../lib/fleetStore";
 import { useDataset } from "../lib/datasetContext";
 import { CustomDatasetBanner } from "../components/CustomDatasetBanner";
+import { api } from "../lib/api";
+import type { FleetEngine } from "../lib/types";
+
+function buildMockFor(datasetId: string, isCustom: boolean, engineCount?: number): FleetEngine[] {
+  const count = isCustom ? Math.max(5, engineCount ?? 5) : 100;
+  return makeMockFleet(count, datasetId);
+}
 
 export function Overview() {
   const { activeDataset } = useDataset();
-  const seed = activeDataset?.dataset_id ?? "FD001";
-  const engines = useMemo(() => {
-    const isCustom = activeDataset?.source === "custom";
-    const count = isCustom ? Math.max(5, activeDataset?.engine_count ?? 5) : 100;
-    return makeMockFleet(count, seed);
-  }, [seed, activeDataset]);
+  const datasetId = activeDataset?.dataset_id ?? "FD001";
+  const isCustom = activeDataset?.source === "custom";
+  const [engines, setEngines] = useState<FleetEngine[]>(() =>
+    buildMockFor(datasetId, isCustom, activeDataset?.engine_count),
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    // Always render mock immediately so the table never flashes empty.
+    setEngines(buildMockFor(datasetId, isCustom, activeDataset?.engine_count));
+    // For custom datasets, replace with real engine IDs from the backend.
+    if (!isCustom) return;
+    api
+      .listEngines(datasetId)
+      .then((ids) => {
+        if (cancelled || ids.length === 0) return;
+        setEngines(makeFleetFromIds(ids, datasetId));
+      })
+      .catch(() => {
+        // Mock already rendered above — nothing to do.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [datasetId, isCustom, activeDataset?.engine_count]);
+
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {

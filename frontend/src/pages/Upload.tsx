@@ -9,6 +9,7 @@ import { MappingSummaryCard } from "../components/upload/MappingSummaryCard";
 import { ProcessingStatus } from "../components/upload/ProcessingStatus";
 import { StepIndicator } from "../components/upload/StepIndicator";
 import { api } from "../lib/api";
+import { useDataset } from "../lib/datasetContext";
 import { mockProcessResult, mockUploadPreview } from "../lib/mock";
 import type {
   AssetType,
@@ -76,6 +77,7 @@ function validateStepTwo(
 }
 
 export function Upload() {
+  const { refresh: refreshDatasets, setActiveDatasetId } = useDataset();
   const [step, setStep] = useState<WizardStep>(1);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<UploadPreview | null>(null);
@@ -166,6 +168,10 @@ export function Upload() {
           `${result.meta.sensor_count} sensor${result.meta.sensor_count === 1 ? "" : "s"}`,
       );
       setProcessState("success");
+      // Pull the new dataset into the context and make it active so the
+      // header dropdown and /fleet immediately reflect the upload.
+      await refreshDatasets();
+      setActiveDatasetId(result.dataset_id);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Processing failed.";
       setProcessState("success");

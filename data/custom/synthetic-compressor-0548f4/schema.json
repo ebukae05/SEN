@@ -1,0 +1,84 @@
+{
+  "upload_id": "3e7642990b004904935af0002b24914a",
+  "asset_id": "synthetic_compressor",
+  "asset_type": "centrifugal_compressor",
+  "industry": "oil_gas",
+  "cycle_column": "cycle",
+  "unit_id_column": "unit_id",
+  "rul_column": "rul",
+  "mappings": [
+    {
+      "column_name": "unit_id",
+      "role": "unit_id",
+      "display_name": "",
+      "type_tag": "custom",
+      "unit": "",
+      "warning_threshold": null,
+      "critical_threshold": null
+    },
+    {
+      "column_name": "cycle",
+      "role": "cycle",
+      "display_name": "",
+      "type_tag": "custom",
+      "unit": "",
+      "warning_threshold": null,
+      "critical_threshold": null
+    },
+    {
+      "column_name": "vibration_x",
+      "role": "sensor",
+      "display_name": "vibration_x",
+      "type_tag": "custom",
+      "unit": "",
+      "warning_threshold": null,
+      "critical_threshold": null
+    },
+    {
+      "column_name": "vibration_y",
+      "role": "sensor",
+      "display_name": "vibration_y",
+      "type_tag": "custom",
+      "unit": "",
+      "warning_threshold": null,
+      "critical_threshold": null
+    },
+    {
+      "column_name": "temperature_bearing",
+      "role": "sensor",
+      "display_name": "temperature_bearing",
+      "type_tag": "custom",
+      "unit": "",
+      "warning_threshold": null,
+      "critical_threshold": null
+    },
+    {
+      "column_name": "pressure_inlet",
+      "role": "sensor",
+      "display_name": "pressure_inlet",
+      "type_tag": "custom",
+      "unit": "",
+      "warning_threshold": null,
+      "critical_threshold": null
+    },
+    {
+      "column_name": "rpm_shaft",
+      "role": "sensor",
+      "display_name": "rpm_shaft",
+      "type_tag": "custom",
+      "unit": "",
+      "warning_threshold": null,
+      "critical_threshold": null
+    },
+    {
+      "column_name": "rul",
+      "role": "rul",
+      "display_name": "",
+      "type_tag": "custom",
+      "unit": "",
+      "warning_threshold": null,
+      "critical_threshold": null
+    }
+  ],
+  "tenant_id": "default"
+}

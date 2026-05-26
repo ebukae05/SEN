@@ -222,7 +222,15 @@ def submit_schema(payload: SchemaPayload) -> ProcessOut:
 def list_datasets() -> list[DatasetMetaOut]:
     """List all datasets: bundled CMAPSS first, then user-uploaded custom."""
     out = _cmapss_metas()
-    out.extend(_meta_to_out(meta) for meta in get_store().list_datasets())
+    custom = [_meta_to_out(meta) for meta in get_store().list_datasets()]
+    out.extend(custom)
+    logger.info(
+        "GET /ingest/datasets -> %d total (%d CMAPSS + %d custom): %s",
+        len(out),
+        len(out) - len(custom),
+        len(custom),
+        [d.dataset_id for d in out],
+    )
     return out
 
 

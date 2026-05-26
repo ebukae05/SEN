@@ -33,39 +33,50 @@ function seedFromString(s: string): number {
   return hash || 7;
 }
 
+function buildEngineFromRand(engineId: number, rand: () => number, threshold: number): FleetEngine {
+  const roll = rand();
+  let rul: number;
+  if (roll < 0.12) rul = Math.round(4 + rand() * 14);
+  else if (roll < 0.32) rul = Math.round(20 + rand() * 18);
+  else rul = Math.round(45 + rand() * 95);
+
+  const points = 24;
+  const startRul = rul + 18 + rand() * 12;
+  const trend = Array.from({ length: points }, (_, k) => {
+    const progress = k / (points - 1);
+    const base = startRul - (startRul - rul) * progress;
+    const noise = (rand() - 0.5) * 1.6;
+    return Math.max(0, base + noise);
+  });
+
+  return {
+    engine_id: engineId,
+    predicted_rul: rul,
+    severity: severityFromRul(rul, threshold),
+    alert: rul < threshold,
+    threshold,
+    trend,
+    degradation_rate: -(0.3 + rand() * 1.5),
+    last_cycle: 120 + Math.round(rand() * 80),
+  };
+}
+
 export function makeMockFleet(count = 100, seed: number | string = 7): FleetEngine[] {
   const seedNum = typeof seed === "string" ? seedFromString(seed) : seed;
   const rand = seededRandom(seedNum);
   const threshold = 30;
   const engines: FleetEngine[] = [];
   for (let i = 1; i <= count; i++) {
-    const roll = rand();
-    let rul: number;
-    if (roll < 0.12) rul = Math.round(4 + rand() * 14);
-    else if (roll < 0.32) rul = Math.round(20 + rand() * 18);
-    else rul = Math.round(45 + rand() * 95);
-
-    const points = 24;
-    const startRul = rul + 18 + rand() * 12;
-    const trend = Array.from({ length: points }, (_, k) => {
-      const progress = k / (points - 1);
-      const base = startRul - (startRul - rul) * progress;
-      const noise = (rand() - 0.5) * 1.6;
-      return Math.max(0, base + noise);
-    });
-
-    const degradation_rate = -(0.3 + rand() * 1.5);
-    engines.push({
-      engine_id: i,
-      predicted_rul: rul,
-      severity: severityFromRul(rul, threshold),
-      alert: rul < threshold,
-      threshold,
-      trend,
-      degradation_rate,
-      last_cycle: 120 + Math.round(rand() * 80),
-    });
+    engines.push(buildEngineFromRand(i, rand, threshold));
   }
+  return engines.sort((a, b) => a.predicted_rul - b.predicted_rul);
+}
+
+export function makeFleetFromIds(ids: number[], seed: number | string = 7): FleetEngine[] {
+  const seedNum = typeof seed === "string" ? seedFromString(seed) : seed;
+  const rand = seededRandom(seedNum);
+  const threshold = 30;
+  const engines = ids.map((id) => buildEngineFromRand(id, rand, threshold));
   return engines.sort((a, b) => a.predicted_rul - b.predicted_rul);
 }
 
