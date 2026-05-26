@@ -68,7 +68,8 @@
       "Bash(npm --version)",
       "Bash(npm create *)",
       "Bash(npm install *)",
-      "Bash(npx playwright *)"
+      "Bash(npx playwright *)",
+      "Bash(taskkill //F //IM node.exe)"
     ]
   }
 }

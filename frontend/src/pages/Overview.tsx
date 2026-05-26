@@ -1,13 +1,41 @@
-import { useMemo } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { FleetSummaryBar } from "../components/FleetSummaryBar";
 import { FleetTable } from "../components/FleetTable";
 import { makeMockFleet } from "../lib/mock";
+import { useFleetStore } from "../lib/fleetStore";
 
 export function Overview() {
   const engines = useMemo(() => makeMockFleet(100), []);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = useFleetStore.getState().scrollY;
+  }, []);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    let frame = 0;
+    const onScroll = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        useFleetStore.getState().setScrollY(el.scrollTop);
+      });
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, []);
 
   return (
-    <div className="relative flex-1 overflow-y-auto px-8 pt-2 pb-16">
+    <div
+      ref={scrollRef}
+      className="relative flex-1 overflow-y-auto px-8 pt-2 pb-16"
+    >
       <div className="mx-auto flex max-w-7xl flex-col gap-8">
         <Hero />
         <FleetSummaryBar engines={engines} />

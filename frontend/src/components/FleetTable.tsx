@@ -1,20 +1,21 @@
 import { ChevronDown, Filter, Search, TrendingDown } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import type { FleetEngine } from "../lib/types";
 import { cn } from "../lib/cn";
 import { Sparkline } from "./Sparkline";
 import { SeverityBadge } from "./SeverityBadge";
+import { useFleetStore } from "../lib/fleetStore";
 
 interface Props {
   engines: FleetEngine[];
 }
 
-type SortKey = "rul" | "id" | "degradation";
-
 export function FleetTable({ engines }: Props) {
-  const [query, setQuery] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("rul");
+  const query = useFleetStore((s) => s.query);
+  const sortKey = useFleetStore((s) => s.sortKey);
+  const setQuery = useFleetStore((s) => s.setQuery);
+  const setSortKey = useFleetStore((s) => s.setSortKey);
 
   const rows = useMemo(() => {
     const filtered = query
@@ -61,8 +62,12 @@ export function FleetTable({ engines }: Props) {
           <button
             type="button"
             onClick={() =>
-              setSortKey((k) =>
-                k === "rul" ? "id" : k === "id" ? "degradation" : "rul",
+              setSortKey(
+                sortKey === "rul"
+                  ? "id"
+                  : sortKey === "id"
+                    ? "degradation"
+                    : "rul",
               )
             }
             className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface-2 px-2.5 text-[12px] text-text-dim hover:text-text"

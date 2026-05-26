@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentName, EngineDetail, FleetEngine, SensorTrend, Severity } from "./types";
+import type { AgentEvent, AgentName, EngineDetail, FleetEngine, Recommendation, SensorTrend, Severity } from "./types";
 
 function seededRandom(seed: number): () => number {
   let state = seed;
@@ -310,6 +310,72 @@ const EVENT_TEMPLATES: Record<
 
 function pad(n: number) {
   return String(n).padStart(3, "0");
+}
+
+const RECOMMENDATIONS: Record<
+  Severity,
+  Array<{ tag: string; text: string }>
+> = {
+  critical: [
+    {
+      tag: "Ground + inspect HPC",
+      text: "Ground engine before next cycle. Inspect HPC stages 3-7 for blade erosion and thermal-barrier coating breakdown. Estimated repair: 48-72 hours.",
+    },
+    {
+      tag: "Ground + replace bearings",
+      text: "Pull engine from service immediately. Fan-bearing vibration signature consistent with impending failure. Replace #1 and #2 bearings, re-balance fan rotor.",
+    },
+    {
+      tag: "Emergency teardown",
+      text: "Critical RUL projection. Schedule emergency teardown at next available bay. Capture borescope footage of HPC and HPT stages prior to disassembly.",
+    },
+  ],
+  warning: [
+    {
+      tag: "Borescope at next MX",
+      text: "Schedule HPC borescope inspection at next maintenance window. Continue daily sensor monitoring; flag any sensor delta above +12%.",
+    },
+    {
+      tag: "Tighten monitoring",
+      text: "Move to enhanced monitoring cadence — sample sensor data every cycle instead of every 10. Re-evaluate after 20 cycles.",
+    },
+    {
+      tag: "Plan inspection window",
+      text: "Add to maintenance queue for next 30-cycle window. Coordinate with line ops for minimum-disruption ground time.",
+    },
+  ],
+  healthy: [
+    {
+      tag: "Standard cadence",
+      text: "Operating within nominal parameters. Continue standard inspection cadence (every 200 cycles). No action required.",
+    },
+  ],
+};
+
+function cyclesUntil(rul: number, rate: number, floor: number): number {
+  const r = Math.abs(rate);
+  if (r === 0) return 9999;
+  return Math.max(0, Math.round((rul - floor) / r));
+}
+
+export function makeMockRecommendations(fleet: FleetEngine[]): Recommendation[] {
+  const rand = seededRandom(31);
+  return fleet.map((e) => {
+    const pool = RECOMMENDATIONS[e.severity];
+    const pick = pool[Math.floor(rand() * pool.length)];
+    return {
+      engine_id: e.engine_id,
+      severity: e.severity,
+      predicted_rul: e.predicted_rul,
+      degradation_rate: e.degradation_rate,
+      threshold: e.threshold,
+      dataset: "FD001",
+      recommendation: pick.text,
+      action_tag: pick.tag,
+      cycles_to_threshold: cyclesUntil(e.predicted_rul, e.degradation_rate, e.threshold),
+      cycles_to_failure: cyclesUntil(e.predicted_rul, e.degradation_rate, 0),
+    };
+  });
 }
 
 export function makeMockEvents(fleet: FleetEngine[], count = 40): AgentEvent[] {

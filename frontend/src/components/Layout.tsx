@@ -6,6 +6,7 @@ export function Layout() {
   const { pathname } = useLocation();
   const isDetail = pathname.startsWith("/engine/");
   const isAgents = pathname === "/agents";
+  const isRecs = pathname === "/recommendations";
   const engineId = isDetail ? pathname.split("/")[2] : undefined;
 
   return (
@@ -25,7 +26,9 @@ export function Layout() {
                 ]
               : isAgents
                 ? [{ label: "Agents" }, { label: "Activity" }]
-                : [{ label: "Fleet" }, { label: "Overview" }]
+                : isRecs
+                  ? [{ label: "Analysis" }, { label: "Recommendations" }]
+                  : [{ label: "Fleet" }, { label: "Overview" }]
           }
         />
         <Outlet />

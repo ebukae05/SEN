@@ -39,6 +39,19 @@ export interface EngineDetail extends FleetEngine {
   top_contributors: string[];
 }
 
+export interface Recommendation {
+  engine_id: number;
+  severity: Severity;
+  predicted_rul: number;
+  degradation_rate: number;
+  threshold: number;
+  dataset: string;
+  recommendation: string;
+  action_tag: string;
+  cycles_to_threshold: number;
+  cycles_to_failure: number;
+}
+
 export type AgentName = "Monitor" | "Diagnostic" | "Advisor";
 
 export interface AgentEvent {
