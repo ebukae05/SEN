@@ -29,6 +29,7 @@ COPY agents ./agents
 COPY api ./api
 COPY cdh ./cdh
 COPY crews ./crews
+COPY ingestion ./ingestion
 COPY models ./models
 COPY tools ./tools
 COPY data/raw ./data/raw
