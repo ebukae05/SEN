@@ -1,0 +1,5 @@
+1. Option A — heuristic mode for custom datasets, defer fine-tuning
+2. Header dropdown for dataset selector
+3. data/custom/ with StoreBackend interface, LocalFilesystemStore implementation
+4. Add tenant_id field wired but inert, default "default"
+Go ahead and build.

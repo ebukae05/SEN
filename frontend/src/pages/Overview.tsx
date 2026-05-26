@@ -3,9 +3,17 @@ import { FleetSummaryBar } from "../components/FleetSummaryBar";
 import { FleetTable } from "../components/FleetTable";
 import { makeMockFleet } from "../lib/mock";
 import { useFleetStore } from "../lib/fleetStore";
+import { useDataset } from "../lib/datasetContext";
+import { CustomDatasetBanner } from "../components/CustomDatasetBanner";
 
 export function Overview() {
-  const engines = useMemo(() => makeMockFleet(100), []);
+  const { activeDataset } = useDataset();
+  const seed = activeDataset?.dataset_id ?? "FD001";
+  const engines = useMemo(() => {
+    const isCustom = activeDataset?.source === "custom";
+    const count = isCustom ? Math.max(5, activeDataset?.engine_count ?? 5) : 100;
+    return makeMockFleet(count, seed);
+  }, [seed, activeDataset]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
@@ -37,7 +45,11 @@ export function Overview() {
       className="relative flex-1 overflow-y-auto px-8 pt-2 pb-16"
     >
       <div className="mx-auto flex max-w-7xl flex-col gap-8">
-        <Hero />
+        {activeDataset?.source === "custom" ? (
+          <CustomDatasetBanner dataset={activeDataset} />
+        ) : (
+          <Hero />
+        )}
         <FleetSummaryBar engines={engines} />
         <FleetTable engines={engines} />
       </div>

@@ -1,4 +1,15 @@
-import type { AgentEvent, AgentName, EngineDetail, FleetEngine, Recommendation, SensorTrend, Severity } from "./types";
+import type {
+  AgentEvent,
+  AgentName,
+  DatasetMeta,
+  EngineDetail,
+  FleetEngine,
+  ProcessResult,
+  Recommendation,
+  SensorTrend,
+  Severity,
+  UploadPreview,
+} from "./types";
 
 function seededRandom(seed: number): () => number {
   let state = seed;
@@ -14,8 +25,17 @@ function severityFromRul(rul: number, threshold: number): Severity {
   return "healthy";
 }
 
-export function makeMockFleet(count = 100): FleetEngine[] {
-  const rand = seededRandom(7);
+function seedFromString(s: string): number {
+  let hash = 0;
+  for (let i = 0; i < s.length; i++) {
+    hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+  }
+  return hash || 7;
+}
+
+export function makeMockFleet(count = 100, seed: number | string = 7): FleetEngine[] {
+  const seedNum = typeof seed === "string" ? seedFromString(seed) : seed;
+  const rand = seededRandom(seedNum);
   const threshold = 30;
   const engines: FleetEngine[] = [];
   for (let i = 1; i <= count; i++) {
@@ -377,6 +397,169 @@ export function makeMockRecommendations(fleet: FleetEngine[]): Recommendation[] 
     };
   });
 }
+
+// ─── Upload wizard mocks (Stage 3) ──────────────────────────────────────────
+
+export const mockUploadPreview: UploadPreview = {
+  upload_id: "demo-upload-0001",
+  filename: "compressor-fleet-sample.csv",
+  format: "csv",
+  row_count: 1240,
+  columns: [
+    "unit_id",
+    "cycle",
+    "vib_de_x",
+    "vib_de_y",
+    "vib_nde_x",
+    "bearing_temp",
+    "oil_pressure",
+    "shaft_rpm",
+    "motor_current",
+    "rul",
+  ],
+  sample_rows: [
+    {
+      unit_id: 1,
+      cycle: 1,
+      vib_de_x: 2.1,
+      vib_de_y: 1.9,
+      vib_nde_x: 1.7,
+      bearing_temp: 68.4,
+      oil_pressure: 142,
+      shaft_rpm: 1798,
+      motor_current: 41.2,
+      rul: 198,
+    },
+    {
+      unit_id: 1,
+      cycle: 2,
+      vib_de_x: 2.2,
+      vib_de_y: 1.9,
+      vib_nde_x: 1.7,
+      bearing_temp: 68.7,
+      oil_pressure: 142,
+      shaft_rpm: 1797,
+      motor_current: 41.3,
+      rul: 197,
+    },
+  ],
+  quality: {
+    is_valid: true,
+    rows_loaded: 1240,
+    engines_loaded: 5,
+    missing_values: 3,
+    out_of_range_values: 0,
+    missing_required_columns: [],
+    errors: [],
+    warnings: ["3 missing sensor readings"],
+  },
+  suggestions: {
+    unit_id: "unit_id",
+    cycle: "cycle",
+    vib_de_x: "sensor",
+    vib_de_y: "sensor",
+    vib_nde_x: "sensor",
+    bearing_temp: "sensor",
+    oil_pressure: "sensor",
+    shaft_rpm: "sensor",
+    motor_current: "sensor",
+    rul: "rul",
+  },
+};
+
+export const mockDatasets: DatasetMeta[] = [
+  {
+    dataset_id: "FD001",
+    asset_id: "FD001",
+    asset_type: "turbofan_engine",
+    industry: "aerospace",
+    tenant_id: "default",
+    source: "cmapss",
+    status: "ready",
+    created_at: "",
+    sensor_count: 14,
+    engine_count: 100,
+    row_count: 20631,
+    has_rul: true,
+    label: "FD001",
+  },
+  {
+    dataset_id: "FD002",
+    asset_id: "FD002",
+    asset_type: "turbofan_engine",
+    industry: "aerospace",
+    tenant_id: "default",
+    source: "cmapss",
+    status: "ready",
+    created_at: "",
+    sensor_count: 14,
+    engine_count: 260,
+    row_count: 53759,
+    has_rul: true,
+    label: "FD002",
+  },
+  {
+    dataset_id: "FD003",
+    asset_id: "FD003",
+    asset_type: "turbofan_engine",
+    industry: "aerospace",
+    tenant_id: "default",
+    source: "cmapss",
+    status: "ready",
+    created_at: "",
+    sensor_count: 14,
+    engine_count: 100,
+    row_count: 24720,
+    has_rul: true,
+    label: "FD003",
+  },
+  {
+    dataset_id: "FD004",
+    asset_id: "FD004",
+    asset_type: "turbofan_engine",
+    industry: "aerospace",
+    tenant_id: "default",
+    source: "cmapss",
+    status: "ready",
+    created_at: "",
+    sensor_count: 14,
+    engine_count: 249,
+    row_count: 61249,
+    has_rul: true,
+    label: "FD004",
+  },
+];
+
+export const mockProcessResult: ProcessResult = {
+  dataset_id: "compressor-demo-a1b2",
+  status: "ready",
+  meta: {
+    dataset_id: "compressor-demo-a1b2",
+    asset_id: "compressor-fleet-sample",
+    asset_type: "centrifugal_compressor",
+    industry: "oil_gas",
+    tenant_id: "default",
+    source: "custom",
+    status: "ready",
+    created_at: new Date().toISOString(),
+    sensor_count: 7,
+    engine_count: 5,
+    row_count: 1240,
+    has_rul: true,
+    sensor_display_names: {
+      vib_de_x: "Drive-End Vibration X",
+      vib_de_y: "Drive-End Vibration Y",
+      vib_nde_x: "Non-Drive-End Vibration X",
+      bearing_temp: "Bearing Temperature",
+      oil_pressure: "Oil Pressure",
+      shaft_rpm: "Shaft RPM",
+      motor_current: "Motor Current",
+    },
+    label: "compressor-fleet-sample",
+  },
+  errors: [],
+  warnings: [],
+};
 
 export function makeMockEvents(fleet: FleetEngine[], count = 40): AgentEvent[] {
   const rand = seededRandom(99);

@@ -1,23 +1,30 @@
 """FastAPI backend exposing the SEN pipeline over REST.
 
 Endpoints:
-    GET  /                        -> service info + endpoint index
-    GET  /health                  -> service liveness probe
-    GET  /engines                 -> list of engine_ids in the active dataset
+    GET  /                          -> service info + endpoint index
+    GET  /health                    -> service liveness probe
+    GET  /engines                   -> list of engine_ids in the active dataset
     GET  /engine/{engine_id}/status -> latest RUL + alert status
-    POST /analyze                 -> kicks off the full three-agent crew
+    POST /analyze                   -> kicks off the full three-agent crew
+    /ingest/*                       -> custom-dataset upload + mapping pipeline
 """
 
 from __future__ import annotations
 
 import logging
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from agents import get_active_dataframe, load_config
+from api.ingestion_routes import router as ingestion_router
 from crews.maintenance_crew import run_pipeline
+from ingestion.heuristic import (
+    compute_engine_status,
+    is_custom_dataset,
+    load_custom_dataframe,
+)
 from tools.predict_tools import check_thresholds, predict_rul
 from tools.stream_tools import stream_sensors
 
@@ -67,6 +74,14 @@ def _build_app() -> FastAPI:
 
 
 app = _build_app()
+app.include_router(ingestion_router)
+
+
+def _resolve_dataframe(dataset_id: str | None):
+    """Return the active DataFrame for either a CMAPSS or custom dataset_id."""
+    if dataset_id and is_custom_dataset(dataset_id):
+        return load_custom_dataframe(dataset_id)
+    return get_active_dataframe(dataset_id)
 
 
 @app.get("/")
@@ -75,13 +90,17 @@ def root() -> dict[str, object]:
     return {
         "name": "SEN — Sensor Engine Network",
         "version": "1.0.0",
-        "description": "Real-time predictive maintenance API for turbofan engines.",
+        "description": "Real-time predictive maintenance API for rotating machinery.",
         "docs": "/docs",
         "endpoints": {
             "health": "/health",
             "engines": "/engines",
             "engine_status": "/engine/{engine_id}/status",
             "analyze": "POST /analyze",
+            "ingest_upload": "POST /ingest/upload",
+            "ingest_schema": "POST /ingest/schema",
+            "ingest_datasets": "GET /ingest/datasets",
+            "ingest_delete": "DELETE /ingest/dataset/{id}",
         },
     }
 
@@ -93,21 +112,30 @@ def health() -> dict[str, str]:
 
 
 @app.get("/engines", response_model=list[int])
-def list_engines() -> list[int]:
-    """Return sorted list of engine_ids in the active processed dataset."""
-    df = get_active_dataframe()
+def list_engines(dataset: str | None = Query(default=None)) -> list[int]:
+    """Return sorted list of engine_ids in the requested or active dataset."""
+    df = _resolve_dataframe(dataset)
     return sorted(int(unit_id) for unit_id in df["unit_id"].unique())
 
 
-def _latest_status(engine_id: int) -> EngineStatus:
+def _latest_status(engine_id: int, dataset_id: str | None) -> EngineStatus:
     """Compute the latest RUL + alert payload for one engine_id."""
-    df = get_active_dataframe()
+    df = _resolve_dataframe(dataset_id)
     if engine_id not in df["unit_id"].values:
         raise HTTPException(404, f"engine_id {engine_id} not found")
+    if dataset_id and is_custom_dataset(dataset_id):
+        status = compute_engine_status(df, engine_id)
+        return EngineStatus(
+            engine_id=status.engine_id,
+            predicted_rul=status.predicted_rul,
+            severity=status.severity if status.severity != "watch" else "watch",
+            alert=status.alert,
+            threshold=status.threshold,
+        )
     windows = list(stream_sensors(df, engine_id))
     if not windows:
         raise HTTPException(422, f"engine {engine_id} has no full sensor window")
-    rul = predict_rul(windows[-1])
+    rul = predict_rul(windows[-1], dataset_id=dataset_id)
     alert = check_thresholds(engine_id, rul)
     config = load_config()
     threshold = float(config["monitoring"]["rul_alert_threshold"])
@@ -124,15 +152,19 @@ def _latest_status(engine_id: int) -> EngineStatus:
 
 
 @app.get("/engine/{engine_id}/status", response_model=EngineStatus)
-def engine_status(engine_id: int) -> EngineStatus:
-    """Return the latest CNN-LSTM RUL prediction + alert state."""
-    return _latest_status(engine_id)
+def engine_status(
+    engine_id: int, dataset: str | None = Query(default=None)
+) -> EngineStatus:
+    """Return the latest RUL + alert state for an engine in the chosen dataset."""
+    return _latest_status(engine_id, dataset)
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)
-def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
+def analyze(
+    request: AnalyzeRequest, dataset: str | None = Query(default=None)
+) -> AnalyzeResponse:
     """Kick off the full Monitor->Diagnostic->Advisor crew for one engine."""
-    df = get_active_dataframe()
+    df = _resolve_dataframe(dataset)
     if request.engine_id not in df["unit_id"].values:
         raise HTTPException(404, f"engine_id {request.engine_id} not found")
     logger.info("API /analyze triggered for engine %d", request.engine_id)

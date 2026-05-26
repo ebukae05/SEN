@@ -7,6 +7,7 @@ import {
   Plane,
   Settings,
   Sparkles,
+  UploadCloud,
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useState } from "react";
@@ -163,6 +164,13 @@ export function Sidebar() {
           icon={Activity}
           label="Agents"
           active={pathname === "/agents"}
+          isCollapsed={isCollapsed}
+        />
+        <NavItem
+          to="/upload"
+          icon={UploadCloud}
+          label="Upload Dataset"
+          active={pathname === "/upload"}
           isCollapsed={isCollapsed}
         />
 

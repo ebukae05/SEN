@@ -64,3 +64,116 @@ export interface AgentEvent {
   meta: Array<{ k: string; v: string }>;
   ts: number;
 }
+
+// ─── Ingestion (Stage 3) ────────────────────────────────────────────────────
+
+export type SensorTypeTag =
+  | "vibration"
+  | "temperature"
+  | "pressure"
+  | "speed"
+  | "current"
+  | "flow"
+  | "oil_quality"
+  | "acoustic"
+  | "humidity"
+  | "voltage"
+  | "custom";
+
+export type ColumnRole = "unit_id" | "cycle" | "sensor" | "rul" | "ignore";
+
+export type Industry =
+  | "oil_gas"
+  | "power_generation"
+  | "heavy_industry"
+  | "mining"
+  | "aerospace"
+  | "marine"
+  | "wind_energy"
+  | "automotive_manufacturing"
+  | "chemical"
+  | "general_manufacturing";
+
+export type AssetType =
+  | "turbofan_engine"
+  | "centrifugal_compressor"
+  | "gas_turbine"
+  | "steam_turbine"
+  | "electric_motor"
+  | "pump"
+  | "gearbox"
+  | "wind_turbine_drivetrain"
+  | "conveyor_drive"
+  | "crusher"
+  | "generator"
+  | "custom";
+
+export interface SensorMapping {
+  column_name: string;
+  role: ColumnRole;
+  display_name: string;
+  type_tag: SensorTypeTag;
+  unit: string;
+  warning_threshold: number | null;
+  critical_threshold: number | null;
+}
+
+export interface SensorSchemaPayload {
+  upload_id: string;
+  asset_id: string;
+  asset_type: AssetType;
+  industry: Industry;
+  cycle_column: string;
+  unit_id_column: string;
+  rul_column: string | null;
+  mappings: SensorMapping[];
+  tenant_id?: string;
+}
+
+export interface DataQualityReport {
+  is_valid: boolean;
+  rows_loaded: number;
+  engines_loaded: number;
+  missing_values: number;
+  out_of_range_values: number;
+  missing_required_columns: string[];
+  errors: string[];
+  warnings: string[];
+}
+
+export interface UploadPreview {
+  upload_id: string;
+  filename: string;
+  format: string;
+  row_count: number;
+  columns: string[];
+  sample_rows: Array<Record<string, unknown>>;
+  quality: DataQualityReport;
+  suggestions: Record<string, ColumnRole>;
+}
+
+export interface DatasetMeta {
+  dataset_id: string;
+  asset_id: string;
+  asset_type: string;
+  industry: string;
+  tenant_id: string;
+  source: "cmapss" | "custom";
+  status: string;
+  created_at: string;
+  sensor_count: number;
+  engine_count: number;
+  row_count: number;
+  has_rul: boolean;
+  sensor_display_names?: Record<string, string>;
+  label: string;
+  error?: string | null;
+}
+
+export interface ProcessResult {
+  dataset_id: string;
+  status: "ready" | "failed" | string;
+  meta: DatasetMeta;
+  errors: string[];
+  warnings: string[];
+}

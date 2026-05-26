@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { DatasetProvider } from "./lib/datasetContext";
 import { Layout } from "./components/Layout";
 import { Overview } from "./pages/Overview";
 import { EngineDetail } from "./pages/EngineDetail";
@@ -7,11 +8,13 @@ import { Recommendations } from "./pages/Recommendations";
 import { Alerts } from "./pages/Alerts";
 import { Trends } from "./pages/Trends";
 import { Diagnostics } from "./pages/Diagnostics";
+import { Upload } from "./pages/Upload";
 
 function App() {
   return (
     <BrowserRouter>
-      <Routes>
+      <DatasetProvider>
+        <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<Navigate to="/fleet" replace />} />
           <Route path="/fleet" element={<Overview />} />
@@ -21,8 +24,10 @@ function App() {
           <Route path="/trends" element={<Trends />} />
           <Route path="/diagnostics" element={<Diagnostics />} />
           <Route path="/recommendations" element={<Recommendations />} />
+          <Route path="/upload" element={<Upload />} />
         </Route>
-      </Routes>
+        </Routes>
+      </DatasetProvider>
     </BrowserRouter>
   );
 }

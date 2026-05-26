@@ -87,6 +87,51 @@ cdh:
     max: 10000.0
   prioritize_by: rul_ascending
 
+ingestion:
+  custom_data_dir: data/custom
+  min_sensors: 3
+  min_rows_per_unit: 50
+  max_upload_mb: 50
+  missing_value_warn_pct: 10
+  preview_sample_rows: 5
+  default_tenant_id: default
+  supported_industries:
+    - oil_gas
+    - power_generation
+    - heavy_industry
+    - mining
+    - aerospace
+    - marine
+    - wind_energy
+    - automotive_manufacturing
+    - chemical
+    - general_manufacturing
+  supported_asset_types:
+    - turbofan_engine
+    - centrifugal_compressor
+    - gas_turbine
+    - steam_turbine
+    - electric_motor
+    - pump
+    - gearbox
+    - wind_turbine_drivetrain
+    - conveyor_drive
+    - crusher
+    - generator
+    - custom
+  sensor_type_tags:
+    - vibration
+    - temperature
+    - pressure
+    - speed
+    - current
+    - flow
+    - oil_quality
+    - acoustic
+    - humidity
+    - voltage
+    - custom
+
 model:
   sequence_length: 30
   n_features: 14

@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Fragment } from "react";
+import { DatasetSelector } from "./DatasetSelector";
 
 interface Crumb {
   label: string;
@@ -46,9 +47,7 @@ export function Header({ crumbs }: { crumbs: Crumb[] }) {
         </button>
       </div>
       <div className="flex items-center gap-3">
-        <span className="hidden font-mono text-[11px] text-text-faint lg:inline">
-          FD001 · CNN-LSTM
-        </span>
+        <DatasetSelector />
         <button
           type="button"
           className="rounded-md border border-violet/40 bg-gradient-to-b from-violet/25 to-violet/10 px-3 py-1.5 text-[12px] font-medium text-white shadow-[0_0_24px_rgba(168,85,247,0.25),inset_0_1px_0_rgba(255,255,255,0.1)] hover:from-violet/35 hover:to-violet/15"
