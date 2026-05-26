@@ -136,9 +136,9 @@ class TestProcessUpload:
         assert processed_path.exists()
         df = pd.read_csv(processed_path)
         assert set(df.columns) >= {"unit_id", "cycle", "vib_de", "vib_nde", "bearing_temp", "RUL"}
-        # Sensors should be in [0, 1] after MinMaxScaler.
-        assert df[["vib_de", "vib_nde", "bearing_temp"]].max().max() <= 1.0
-        assert df[["vib_de", "vib_nde", "bearing_temp"]].min().min() >= 0.0
+        # Sensors should be in [0, 1] after MinMaxScaler (with float tolerance).
+        assert df[["vib_de", "vib_nde", "bearing_temp"]].max().max() <= 1.0 + 1e-9
+        assert df[["vib_de", "vib_nde", "bearing_temp"]].min().min() >= -1e-9
 
     def test_too_few_sensors_rejected(
         self, store: LocalFilesystemStore, tmp_path: Path

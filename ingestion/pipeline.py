@@ -225,9 +225,11 @@ def _validate_data_quality(
     return errors, warnings
 
 
-def _apply_rename_with_drop(df: pd.DataFrame, rename_map: dict[str, str]) -> pd.DataFrame:
-    """Rename columns in rename_map; drop columns not referenced anywhere."""
-    keep = set(rename_map.keys())
+def _apply_rename_with_drop(
+    df: pd.DataFrame, rename_map: dict[str, str], sensor_cols: list[str]
+) -> pd.DataFrame:
+    """Keep rename_map keys and sensor columns; rename specials; drop everything else."""
+    keep = set(rename_map.keys()) | set(sensor_cols)
     renamed = df[[c for c in df.columns if c in keep]].rename(columns=rename_map)
     return renamed
 
@@ -265,12 +267,13 @@ def process_upload(
     upload_path = backend.get_upload_path(schema.upload_id)
     raw_df = load_file(upload_path)
     rename_map, sensor_cols = _build_rename_map(schema)
-    missing_cols = [c for c in rename_map if c not in raw_df.columns]
+    referenced = list(rename_map.keys()) + sensor_cols
+    missing_cols = [c for c in referenced if c not in raw_df.columns]
     if missing_cols:
         return _failed_result_no_dataset(
             schema, [f"Schema references missing columns: {missing_cols}"]
         )
-    renamed = _apply_rename_with_drop(raw_df, rename_map)
+    renamed = _apply_rename_with_drop(raw_df, rename_map, sensor_cols)
     runtime_errors, runtime_warnings = _validate_data_quality(renamed, sensor_cols)
     if runtime_errors:
         return _failed_result_no_dataset(schema, runtime_errors)

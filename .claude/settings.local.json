@@ -69,7 +69,8 @@
       "Bash(npm create *)",
       "Bash(npm install *)",
       "Bash(npx playwright *)",
-      "Bash(taskkill //F //IM node.exe)"
+      "Bash(taskkill //F //IM node.exe)",
+      "Bash(npx vite *)"
     ]
   }
 }
