@@ -64,7 +64,11 @@
       "Bash(curl -sS http://127.0.0.1:8000/engine/100/status)",
       "Bash(curl *)",
       "Bash(git *)",
-      "WebFetch(domain:kairos-purpose-app.vercel.app)"
+      "WebFetch(domain:kairos-purpose-app.vercel.app)",
+      "Bash(npm --version)",
+      "Bash(npm create *)",
+      "Bash(npm install *)",
+      "Bash(npx playwright *)"
     ]
   }
 }
