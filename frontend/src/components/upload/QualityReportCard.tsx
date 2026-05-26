@@ -37,10 +37,10 @@ export function QualityReportCard({ preview }: QualityReportCardProps) {
   const Icon = tone === "ok" ? CheckCircle2 : tone === "warn" ? Info : AlertTriangle;
   const headline =
     tone === "ok"
-      ? "Data quality looks clean."
+      ? "Preview ready — assign sensor roles in the next step."
       : tone === "warn"
-        ? "Data loaded with warnings."
-        : "Data quality issues — fix before continuing.";
+        ? "Loaded with warnings — assign sensor roles in the next step."
+        : "Data quality issues — review before continuing.";
   const iconClass =
     tone === "ok"
       ? "text-status-green"
@@ -57,12 +57,8 @@ export function QualityReportCard({ preview }: QualityReportCardProps) {
       <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
         <Stat label="Rows loaded" value={preview.quality.rows_loaded.toLocaleString()} />
         <Stat
-          label="Engines detected"
-          value={
-            preview.quality.engines_loaded > 0
-              ? String(preview.quality.engines_loaded)
-              : "—"
-          }
+          label="Columns detected"
+          value={String(preview.columns.length)}
         />
         <Stat
           label="Missing values"

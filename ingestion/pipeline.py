@@ -110,7 +110,12 @@ def _build_preview(path: Path, upload_id: str, filename: str) -> UploadPreview:
     fmt = detect_format(path)
     df = load_file(path)
     sample_n = int(config["ingestion"]["preview_sample_rows"])
-    quality = check_data_quality(df, config["cdh"])
+    # Preview is pre-mapping: required_columns ('unit_id', 'cycle') are SEN's
+    # internal names that only appear after Step 2 renaming. Drop that check
+    # here so the wizard can show *any* CSV's columns; structural validation
+    # runs in process_upload once the user has assigned roles.
+    preview_cdh_cfg = {**config["cdh"], "required_columns": []}
+    quality = check_data_quality(df, preview_cdh_cfg)
     suggestions = _suggest_roles(df.columns.tolist())
     sample = df.head(sample_n).where(pd.notna(df.head(sample_n)), None).to_dict(orient="records")
     return UploadPreview(

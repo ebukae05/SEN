@@ -116,6 +116,29 @@ class TestUploadPreview:
         with pytest.raises(ValueError, match="max allowed"):
             save_upload_and_preview(oversized, "huge.csv", store)
 
+    def test_preview_accepts_csv_without_unit_id_or_cycle(
+        self, store: LocalFilesystemStore, tmp_path: Path
+    ) -> None:
+        # CSV with arbitrary column names — Step 1 must accept it so the
+        # wizard can show the columns and let the user assign roles in Step 2.
+        df = pd.DataFrame(
+            {
+                "machine": [1, 1, 1, 2, 2, 2],
+                "step": [1, 2, 3, 1, 2, 3],
+                "temp_in": [60.0, 60.5, 61.0, 59.0, 59.5, 60.0],
+                "pressure": [101.0, 101.2, 101.4, 100.8, 101.0, 101.1],
+                "rpm": [1800, 1810, 1820, 1790, 1795, 1800],
+            }
+        )
+        csv_path = tmp_path / "arbitrary.csv"
+        df.to_csv(csv_path, index=False)
+        preview = save_upload_and_preview(csv_path.read_bytes(), "arbitrary.csv", store)
+        assert preview.row_count == 6
+        assert preview.columns == ["machine", "step", "temp_in", "pressure", "rpm"]
+        assert preview.quality.is_valid is True
+        assert preview.quality.missing_required_columns == []
+        assert all("Missing required columns" not in e for e in preview.quality.errors)
+
 
 class TestProcessUpload:
     """process_upload happy and validation-rejection paths."""
