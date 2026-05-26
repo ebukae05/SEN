@@ -7,7 +7,27 @@ export function Layout() {
   const isDetail = pathname.startsWith("/engine/");
   const isAgents = pathname === "/agents";
   const isRecs = pathname === "/recommendations";
+  const isAlerts = pathname === "/alerts";
+  const isTrends = pathname === "/trends";
+  const isDiagnostics = pathname === "/diagnostics";
   const engineId = isDetail ? pathname.split("/")[2] : undefined;
+
+  const crumbs = isDetail
+    ? [
+        { label: "Fleet", to: "/fleet" },
+        { label: `Engine #${String(engineId).padStart(3, "0")}` },
+      ]
+    : isAgents
+      ? [{ label: "Agents" }, { label: "Activity" }]
+      : isRecs
+        ? [{ label: "Analysis" }, { label: "Recommendations" }]
+        : isAlerts
+          ? [{ label: "Fleet" }, { label: "Alerts" }]
+          : isTrends
+            ? [{ label: "Analysis" }, { label: "Trends" }]
+            : isDiagnostics
+              ? [{ label: "Analysis" }, { label: "Diagnostics" }]
+              : [{ label: "Fleet" }, { label: "Overview" }];
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-bg text-text">
@@ -17,20 +37,7 @@ export function Layout() {
           <div className="glow-violet absolute inset-x-0 top-0 h-[680px]" />
           <div className="bg-grid absolute inset-x-0 top-0 h-[680px]" />
         </div>
-        <Header
-          crumbs={
-            isDetail
-              ? [
-                  { label: "Fleet", to: "/" },
-                  { label: `Engine #${String(engineId).padStart(3, "0")}` },
-                ]
-              : isAgents
-                ? [{ label: "Agents" }, { label: "Activity" }]
-                : isRecs
-                  ? [{ label: "Analysis" }, { label: "Recommendations" }]
-                  : [{ label: "Fleet" }, { label: "Overview" }]
-          }
-        />
+        <Header crumbs={crumbs} />
         <Outlet />
       </main>
     </div>

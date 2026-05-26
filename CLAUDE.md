@@ -1,12 +1,16 @@
 # SEN — Sensor Engine Network (v3)
 
-## Your Role
-You are a senior Python engineer implementing a system designed by the architect.
+---
+
+## Stage 1: Backend & ML Pipeline
+
+### Your Role
+You are a **senior Python engineer** implementing a system designed by the architect.
 The architecture is final. Do not suggest alternative frameworks, models, or patterns.
 Build exactly what is specified below. Ask clarifying questions only about
 implementation details, never about design decisions.
 
-## What This Project Is
+### What This Project Is
 SEN is a real-time predictive maintenance platform that uses a multi-agent AI pipeline
 to ingest sensor data from any rotating machinery, predict Remaining Useful Life (RUL),
 diagnose degradation patterns, and generate maintenance recommendations. While the
@@ -19,13 +23,13 @@ This is a portfolio project targeting aerospace/defense engineering roles and a 
 consulting/SaaS business targeting MRO shops, industrial operators, and defense
 contractors.
 
-## Stack
+### Stack
 - Python 3.10+
 - CrewAI (agent orchestration framework)
 - Google Gemini 2.5 Flash (LLM powering agents — free tier via langchain-google-genai)
 - PyTorch (CNN-LSTM model training and inference)
 - FastAPI (REST API backend)
-- React + TypeScript + Tailwind CSS (frontend dashboard — built separately in v0.dev)
+- React + TypeScript + Vite + Tailwind CSS (frontend — see Stage 2)
 - Pandas, NumPy, scikit-learn (MinMaxScaler), SciPy (linregress), Matplotlib
 - ReportLab (PDF report generation)
 - Python-dotenv (environment variable management)
@@ -33,16 +37,16 @@ contractors.
 - Docker (containerization)
 - NASA CMAPSS FD001-FD004 datasets
 
-## Project Structure
+### Project Structure
 ```
 SEN/
-├── .cursorrules              # This file — project memory
+├── CLAUDE.md                 # This file — project memory
 ├── .env                      # API keys (GOOGLE_API_KEY) — never commit
 ├── .gitignore
 ├── requirements.txt
 ├── config.yaml               # All configurable values
 ├── README.md
-├── prompts.md                # Saved Cursor prompts
+├── prompts.md                # Saved Claude Code prompts
 │
 ├── data/
 │   ├── raw/                  # train_FD001-4.txt, test_FD001-4.txt, RUL_FD001-4.txt
@@ -79,11 +83,12 @@ SEN/
 ├── api/
 │   └── main.py               # FastAPI endpoints
 │
+├── frontend/                 # React + TypeScript dashboard (see Stage 2)
+│
 ├── outputs/
 │   └── reports/              # Generated PDF maintenance reports
 │
 ├── notebooks/                # EDA and experimentation
-│   └── eda.ipynb
 │
 ├── docs/
 │   └── architecture.png      # System design diagram from Draw.io
@@ -96,9 +101,9 @@ SEN/
     └── test_api.py
 ```
 
-## System Architecture
+### System Architecture
 
-### Overview
+#### Overview
 ```
 Raw sensor data (any format)
 → CDH Layer (validate, prioritize, format)
@@ -107,7 +112,7 @@ Raw sensor data (any format)
 → FastAPI → React Dashboard + PDF Reports
 ```
 
-### CDH Layer (cdh/handler.py)
+#### CDH Layer (cdh/handler.py)
 The Command and Data Handling layer sits between raw data input and preprocessing.
 Inspired by spacecraft CDH systems — manages data flow, validation, and formatting.
 
@@ -121,10 +126,11 @@ Responsibilities:
 - Convert any format to SEN's internal standard Pandas DataFrame
 - Log all validation errors and data quality issues
 
-This is what makes SEN sensor-agnostic. The CDH layer normalizes any input format
-into SEN's internal standard so the agents and model never care what format came in.
+This is the core of SEN's sensor-agnostic design. The CDH layer normalizes any input
+format into SEN's internal standard so the agents and model never care what format
+came in or what the sensors are called.
 
-### preprocess.py (Deterministic Script — NOT an agent)
+#### preprocess.py (Deterministic Script — NOT an agent)
 Always runs the same steps in the same order. No LLM involved.
 - Load specified CMAPSS dataset from data/raw/
 - Add column headers
@@ -134,37 +140,29 @@ Always runs the same steps in the same order. No LLM involved.
 - Generate RUL labels using piecewise linear method with cap from config.yaml
 - Save cleaned data to data/processed/
 
-### Agent 1: MonitorAgent
+#### Three-Agent Pipeline (Monitor → Diagnostic → Advisor)
+There is NO DataEngineerAgent. Data engineering is handled by preprocess.py.
+The three agents are:
+
+**Agent 1: MonitorAgent**
 - Role: "Real-Time Engine Health Monitor"
 - Goal: "Stream sensor data through the CNN-LSTM model and flag engines approaching failure"
-- Tools:
-  - stream_sensors(df, engine_id, window_size) → yields sliding windows
-  - predict_rul(window) → runs CNN-LSTM inference, returns RUL float
-  - check_thresholds(engine_id, rul, threshold) → returns alert if RUL below threshold
-- Libraries: PyTorch, NumPy
+- Tools: stream_sensors, predict_rul, check_thresholds
 - Output: RUL predictions + anomaly flags per engine
 
-### Agent 2: DiagnosticAgent
+**Agent 2: DiagnosticAgent**
 - Role: "Engine Diagnostics Specialist"
 - Goal: "Investigate flagged engines to determine root cause and severity of degradation"
-- Tools:
-  - compare_to_fleet(df, engine_id) → compares engine metrics to fleet average
-  - sensor_trends(df, engine_id) → ranks sensors by rate of decline
-  - degradation_rate(df, engine_id) → calculates rate of decline using scipy linregress
-- Libraries: Pandas, NumPy, SciPy
+- Tools: compare_to_fleet, sensor_trends, degradation_rate
 - Output: Diagnosis with root cause, degrading sensors, severity rating
 
-### Agent 3: MaintenanceAdvisorAgent
+**Agent 3: MaintenanceAdvisorAgent**
 - Role: "Maintenance Planning Advisor"
 - Goal: "Generate actionable maintenance recommendations and formal PDF reports"
-- Tools:
-  - time_to_critical(rul, degradation_rate) → estimates cycles until unsafe
-  - recommend_action(diagnosis) → calls Gemini 2.5 Flash, returns recommendation string
-  - generate_report(engine_id, diagnosis, recommendation) → creates PDF via ReportLab
-- Libraries: NumPy, Google Gemini API, ReportLab
+- Tools: time_to_critical, recommend_action, generate_report
 - Output: Maintenance recommendation + PDF report
 
-## CNN-LSTM Model Architecture
+#### CNN-LSTM Model Architecture
 ```
 Input (30 timesteps × 14 features)
 → Conv1D (filters=64, kernel=3, ReLU)
@@ -178,161 +176,286 @@ Input (30 timesteps × 14 features)
 ```
 - Loss: MSELoss
 - Optimizer: Adam (lr=0.001)
-- Epochs: 50
-- Batch size: 32
-- Sequence length: 30 cycles
-- RUL cap: 130 (piecewise linear labeling)
+- Epochs: 50, Batch size: 32, Sequence length: 30 cycles, RUL cap: 130
 - Target RMSE: 13-16 cycles on FD001 test set
 
-## About the CMAPSS Datasets
-All four datasets share the same 21 sensor columns. Constant sensors vary per dataset
-and must be detected dynamically by validate_sensors, not hardcoded.
-
+#### About the CMAPSS Datasets
 - FD001: 100 engines, 1 operating condition, 1 fault mode (HPC degradation)
 - FD002: 260 engines, 6 operating conditions, 1 fault mode (HPC degradation)
 - FD003: 100 engines, 1 operating condition, 2 fault modes (HPC + fan degradation)
 - FD004: 249 engines, 6 operating conditions, 2 fault modes (HPC + fan degradation)
 
 Column names: unit_id, cycle, op1, op2, op3, s1-s21
-Keep 14 sensors after dropping constants (exact sensors determined dynamically per dataset)
+Keep 14 sensors after dropping constants (detected dynamically per dataset)
 
-## Data File Locations
-- data/raw/train_FD001.txt through train_FD004.txt
-- data/raw/test_FD001.txt through test_FD004.txt
-- data/raw/RUL_FD001.txt through RUL_FD004.txt
-
-## CrewAI Configuration
-```python
-from crewai import Crew, Process
-
-crew = Crew(
-    agents=[monitor, diagnostician, advisor],
-    tasks=[monitor_task, diagnose_task, advise_task],
-    process=Process.sequential,
-    verbose=True
-)
-```
-- LLM: Gemini 2.5 Flash via langchain-google-genai
-- Process: Sequential
-- Each agent receives the previous agent's output as context
-
-## FastAPI Endpoints
-- GET /health — health check, returns status ok
-- GET /engines — list all engine IDs from processed dataset
+#### FastAPI Endpoints
+- GET /health — health check
+- GET /engines — list all engine IDs
 - GET /engine/{id}/status — latest prediction for one engine
-- POST /analyze — accepts engine_id, triggers full crew pipeline, returns results
+- GET /fleet — health snapshot for all engines
+- POST /analyze — full agent pipeline for one engine
 
-## Frontend Dashboard (React + TypeScript — built in v0.dev)
-The frontend is a separate React/TypeScript/Tailwind application.
-FastAPI serves data. The dashboard consumes it via REST API calls.
-Do NOT build a Plotly Dash dashboard. Do NOT build any Python frontend.
+Backend deployed at: https://sen-production.up.railway.app
 
-Dashboard panels:
-- Fleet health summary bar — total engines, green/yellow/red counts, avg RUL, active alerts
-- Fleet overview grid — all engines color-coded by status, sortable by urgency
-- Single engine detail — RUL countdown, degradation curve, sensor trends over cycles
-- Agent activity log — scrolling feed of what each agent found, color-coded by severity
-- Maintenance recommendations panel — latest recommendations with severity badges
-
-## Sensor-Agnostic Design Principles
-SEN is not an aircraft-only tool. The CDH layer's schema adapter allows any operator
-to map their own column names to SEN's internal format. This means SEN can monitor:
-- Aircraft turbofan engines (current use case)
-- Wind turbine gearboxes
-- Railroad wheel bearings
-- Industrial pumps and compressors
-- Naval vessel engines
-- Manufacturing equipment
-
-The model needs retraining per equipment type but the architecture stays the same.
-
-## Build Phases — Follow This Order
-
-### Phase 1: Project Setup
-- Create full folder structure
-- Set up venv, install all dependencies
-- Create config.yaml with all configurable values
-- Create .env with GOOGLE_API_KEY placeholder
-- Create .gitignore
-- Verify CrewAI and Gemini 2.5 Flash connect successfully
-
-### Phase 2: CDH Layer
-- Build cdh/handler.py
-- Support CSV, JSON, Excel input formats
-- Schema adapter for user-defined column mapping
-- Data validation and error flagging
-- Engine prioritization by RUL
-- Write tests in tests/test_cdh.py
-- Test with CMAPSS CSV and a manually created JSON file
-
-### Phase 3: Preprocessing
-- Build preprocess.py as a deterministic script
-- Dynamic sensor detection (not hardcoded)
-- Normalize, label, save to data/processed/
-- Write tests in tests/test_preprocess.py
-- Test with all four CMAPSS datasets
-
-### Phase 4: CNN-LSTM Model
-- Build models/cnn_lstm.py (architecture)
-- Build models/train.py (training script)
-- Train on FD001, save weights to models/saved/
-- Target RMSE: 13-16 cycles
-- Verify model loads and runs inference
-
-### Phase 5: Tools
-- Build all four tool files
-- Test every function individually
-- Write tests in tests/test_tools.py
-- Full pipeline test: raw data → CDH → preprocess → stream → predict → RUL output
-
-### Phase 6: Agents + Crew
-- Build all three agents
-- Build crews/maintenance_crew.py
-- Test crew.kickoff() end to end
-- Verify output makes sense
-
-### Phase 7: FastAPI
-- Build api/main.py
-- Test all endpoints with Swagger UI at /docs
-
-### Phase 8: Integration + Docker
-- Verify full pipeline works end to end
-- Ensure Docker container runs the full stack
-- Deploy to Railway for a shareable demo URL
-
-### Phase 9: README + Demo
-- Add architecture diagram screenshot
-- Add dashboard screenshot
-- Add working quickstart instructions
-- Add API documentation
-- Record Loom walkthrough
-
-## Rules — Never Do These
-- Do not build a Plotly Dash or any Python frontend. Frontend is React/TypeScript only.
-- Do not create a DataEngineerAgent. Data engineering is handled by preprocess.py.
-- Do not skip phases. Build and test each phase before moving to the next.
-- Do not write functions longer than 30 lines.
-- Do not use vague variable names like x, df2, temp, data1.
-- Do not hardcode values. Everything configurable goes in config.yaml.
-- Do not store API keys in code. Use .env and python-dotenv.
-- Do not install packages without adding them to requirements.txt.
-- Do not use print() for logging. Use Python logging module.
-- Do not catch generic exceptions. Catch specific ones.
-- Do not bleed responsibilities between layers. CDH validates. preprocess cleans. Tools compute. Agents orchestrate.
-
-## Rules — Always Do These
-- Always read config.yaml for any configurable value.
-- Always type hint every function parameter and return value.
-- Always write a docstring for every function.
-- Always validate inputs at the start of every function.
+### Stage 1 Rules
+- No DataEngineerAgent. Data engineering is preprocess.py.
+- No hardcoded values. Everything configurable goes in config.yaml.
+- No print() — use Python logging module.
+- No generic exception catching.
 - Always use pathlib.Path for file paths.
-- Always use logging.getLogger(__name__) for logging.
-- Always test after completing each phase before moving on.
+- Always type hint every function.
+- Always write docstrings on every function.
+- Never touch git without explicit instruction.
 
-## Git Rules
-- Never run git push, git commit, or git add automatically.
-- Never touch git without explicit instruction from the architect.
-- All version control decisions are made by the architect only.
+---
 
-## Current Phase
-Phase 1 — Project Setup
+## Stage 2: Frontend Dashboard
+
+### Your Role
+You are a **Senior UI/UX Designer and Frontend Engineer** with 10+ years
+building production-grade data-intensive dashboards for industrial and
+engineering operations environments.
+
+### Design Direction
+The aesthetic is an engineering operations center — dark, precise, technical.
+Something a Lockheed or Boeing engineer would actually use.
+
+Primary references:
+- **Wope (wope.com)** — deep dark purple/black background, subtle violet gradient
+  glow, colored status badges, data-dense table layout
+- **Linear app** — clean sidebar navigation, grouped nav items, icons + labels,
+  active state highlighting
+
+### What Was Built
+- **`/` Overview** — fleet summary bar (5 stat cards), sortable/searchable fleet
+  table with sparklines and severity badges, pinned engines in sidebar
+- **`/engine/:id` Engine Detail** — RUL degradation curve, diagnostic agent card,
+  maintenance advisor card, sensor trend grid with modal drill-down
+- **`/agents` Agent Activity** — live feed of all three agent events grouped by
+  time, filterable by agent type, severity badges, meta chips
+- **`/recommendations` Maintenance Recommendations** — cards grouped by severity
+  (critical/watch/healthy), PDF download button, View Engine links
+- **`/alerts` Alerts** — engines where alert === true, sorted by severity
+- **`/reports` Reports** — PDF report generation per engine
+- **`/settings` Settings** — dataset selector, API connection status
+
+### Design System (frontend/src/index.css)
+All colors are CSS variables — never hardcode hex values:
+```css
+--color-bg: #0A0A0F
+--color-surface: #11111A
+--color-surface-2: #16161F
+--color-surface-hover: #1C1C28
+--color-border: rgba(255, 255, 255, 0.06)
+--color-border-strong: rgba(255, 255, 255, 0.10)
+--color-text: #E5E5EA
+--color-text-dim: #8A8A92
+--color-text-faint: #5A5A62
+--color-violet: #A855F7
+--color-violet-glow: #C084FC
+--color-violet-soft: rgba(168, 85, 247, 0.12)
+--color-status-green: #22C55E
+--color-status-amber: #F59E0B
+--color-status-red: #EF4444
+--font-sans: "Inter"
+--font-mono: "JetBrains Mono"
+```
+
+### Key Frontend Files
+- `frontend/src/components/Sidebar.tsx` — animated collapsible nav
+- `frontend/src/components/Layout.tsx` — shell with header and outlet
+- `frontend/src/components/Header.tsx` — breadcrumb + search + actions
+- `frontend/src/components/FleetTable.tsx` — sortable engine table
+- `frontend/src/components/FleetSummaryBar.tsx` — stat cards
+- `frontend/src/components/LineChart.tsx` — custom SVG RUL curve
+- `frontend/src/components/SensorChart.tsx` — sensor detail chart
+- `frontend/src/components/SeverityBadge.tsx` — status indicator
+- `frontend/src/components/Sparkline.tsx` — inline trend chart
+- `frontend/src/components/Modal.tsx` — accessible portal modal
+- `frontend/src/components/SensorDetailModal.tsx` — sensor drill-down
+- `frontend/src/lib/mock.ts` — all mock data generation (always keep working)
+- `frontend/src/lib/types.ts` — shared TypeScript interfaces
+- `frontend/src/lib/api.ts` — API client pointing to Railway backend
+- `frontend/src/pages/Overview.tsx`
+- `frontend/src/pages/EngineDetail.tsx`
+- `frontend/src/pages/Agents.tsx`
+- `frontend/src/pages/Recommendations.tsx`
+
+### Tech Stack
+- React 19 + TypeScript
+- Vite 8
+- Tailwind CSS v4 (no config file — uses @theme in CSS)
+- Framer Motion v12
+- React Router v7
+- Recharts v3
+- Lucide React v1
+- clsx
+
+### Stage 2 UI Rules
+- Dark theme only — no light mode ever
+- Monospace font for ALL numbers, IDs, cycle counts, sensor values
+- Severity is always one of three: healthy (green), warning (amber), critical (red)
+- Every number that matters has a unit label next to it
+- Hover states reveal actions — nothing cluttered by default
+- Charts are custom SVG or Recharts — no other chart libraries
+- Animations are purposeful — framer-motion for layout, CSS for micro-interactions
+- Mock data must always work as fallback — never a blank screen
+- Never hardcode colors — always use CSS variables
+
+---
+
+## Stage 3: ML Platform & Product Generalization
+
+### Your Role
+You are a **Senior ML Platform Engineer and AI Systems Architect** with 10+ years
+building production-grade predictive analytics platforms for industrial enterprise
+clients. You have deep expertise in:
+
+- Designing sensor-agnostic ML pipelines that generalize across industries
+- FastAPI backend architecture and scalable REST API design
+- Time-series data ingestion, normalization, and preprocessing at scale
+- CNN-LSTM and transformer-based RUL models
+- Multi-tenant SaaS architecture and enterprise data contracts
+- IoT data streaming, edge computing, and cloud deployment
+- Docker containerization and production ML model serving
+
+### Product Context
+SEN is pivoting from a NASA CMAPSS research demo to a **universal rotating machinery
+predictive maintenance platform**. The CNN-LSTM architecture doesn't care what
+industry the equipment is from — it cares about sensor patterns over time.
+
+**Core value proposition:**
+"Predict equipment failure before it happens — for any rotating machine, any industry,
+using your existing sensor data."
+
+### Target Markets (Priority Order)
+1. **Oil & Gas** — $220K-$500K/hr downtime, compressors/turbines/pumps, highest pain
+2. **Power Generation** — gas turbines/steam turbines, closest to current CMAPSS model
+3. **Heavy Industry / Mining** — crushers/mills/conveyors, massive scale
+4. **Aerospace & Defense** — current CMAPSS foundation, already validated
+5. **Wind Energy** — gearboxes/generators/bearings, remote sites
+6. **Marine / Shipping** — ship engines/propulsion/pumps
+7. **Automotive Manufacturing** — assembly line motors/robots/conveyors
+
+### The CDH Layer IS the Sensor Abstraction
+The CDH layer (cdh/handler.py) is already built and is the foundation for
+sensor agnosticism. It already:
+- Accepts CSV, JSON, Excel
+- Has a schema adapter that maps user-defined column names to SEN's internal format
+- Validates data quality and flags issues
+- Prioritizes engines by RUL
+
+Stage 3 extends this — do NOT rebuild it. Build on top of it.
+
+### Stage 3 Goals
+1. **Data ingestion UI** — CSV upload + custom sensor schema definition in the frontend
+2. **Sensor mapping UI** — engineers label and map their own sensor columns
+3. **Model generalization** — fine-tune CNN-LSTM on customer-provided historical data
+4. **Alert integrations** — Slack, email, PagerDuty webhooks
+5. **Streaming API** — accept real-time IoT sensor data via POST endpoints
+
+### Sensor Schema Specification
+
+#### Minimum Requirements
+- At least 3 sensors (more = better predictions)
+- At least 50 cycles/readings of historical data per asset
+- One unit/asset ID column to distinguish between machines
+- One time/cycle column (timestamp or integer cycle count)
+- One RUL label column (if available) — if missing, SEN uses unsupervised anomaly mode
+
+#### Required CSV Format
+```csv
+unit_id,cycle,sensor_1,sensor_2,sensor_3,...,sensor_n,rul
+1,1,0.52,341.2,0.89,...,0.34,180
+1,2,0.53,341.8,0.88,...,0.35,179
+2,1,0.49,338.1,0.91,...,0.31,210
+```
+
+#### Sensor Type Tags
+| Tag | Sensor Type | Typical Unit | Failure Signal |
+|-----|-------------|--------------|----------------|
+| `vibration` | Accelerometer (x/y/z) | mm/s, g | Rising = bearing wear |
+| `temperature` | Thermocouple / RTD | °C, °F | Rising = overheating |
+| `pressure` | Pressure transducer | PSI, bar, kPa | Dropping = seal wear |
+| `speed` | Tachometer / RPM | RPM | Dropping = shaft drag |
+| `current` | Current transducer | Amps | Rising = motor strain |
+| `flow` | Flow meter | L/min, GPM | Dropping = blockage |
+| `oil_quality` | Oil particle counter | NAS class | Rising = contamination |
+| `acoustic` | Ultrasound / AE sensor | dB | Rising = early fault |
+| `humidity` | Humidity sensor | % RH | Rising = corrosion risk |
+| `voltage` | Voltage sensor | V | Deviation = electrical fault |
+| `custom` | Any other sensor | User-defined | User-defined threshold |
+
+#### Sensor Schema JSON Contract
+```json
+{
+  "asset_id": "compressor-unit-7",
+  "asset_type": "centrifugal_compressor",
+  "industry": "oil_gas",
+  "cycle_column": "cycle",
+  "rul_column": "rul",
+  "sensors": [
+    {
+      "column_name": "vib_bearing_de",
+      "display_name": "Drive-End Bearing Vibration",
+      "type_tag": "vibration",
+      "unit": "mm/s",
+      "normal_range": [0.5, 4.5],
+      "warning_threshold": 7.1,
+      "critical_threshold": 11.2
+    }
+  ]
+}
+```
+
+#### Validation Rules (Backend Must Enforce)
+- Reject if fewer than 3 sensor columns detected
+- Reject if fewer than 50 rows per unit_id
+- Reject if cycle column is non-monotonic per unit
+- Warn (do not reject) if RUL column missing — switch to unsupervised mode
+- Warn if any sensor column has >10% missing values — impute with forward fill
+- Normalize all sensor readings per column (min-max) before model inference
+
+#### Supported Industries
+```python
+SUPPORTED_INDUSTRIES = [
+    "oil_gas", "power_generation", "heavy_industry", "mining",
+    "aerospace", "marine", "wind_energy", "automotive_manufacturing",
+    "chemical", "general_manufacturing"
+]
+
+SUPPORTED_ASSET_TYPES = [
+    "turbofan_engine", "centrifugal_compressor", "gas_turbine",
+    "steam_turbine", "electric_motor", "pump", "gearbox",
+    "wind_turbine_drivetrain", "conveyor_drive", "crusher",
+    "generator", "custom"
+]
+```
+
+### Stage 3 Engineering Principles
+- **Sensor agnosticism first** — never hardcode sensor names or counts
+- **Data contracts matter** — validate schemas strictly on ingest, fail fast
+- **Backwards compatible** — CMAPSS demo data must still work as fallback
+- **Multi-tenant ready** — design every endpoint as if multiple companies use it
+- **Production over polish** — working pipeline beats perfect UI every time
+- **The CrewAI pipeline must remain intact** — all new sensor data passes through
+  the same Monitor → Diagnostic → Advisor agent flow
+- **Mock data fallback must always work** — never a blank screen
+
+### Key Files to Check Before Making Changes
+- `cdh/handler.py` — CDH layer (the sensor abstraction foundation)
+- `preprocess.py` — deterministic preprocessing script
+- `api/main.py` — FastAPI routes
+- `models/cnn_lstm.py` — CNN-LSTM architecture
+- `models/train.py` — training script
+- `config.yaml` — all configurable values
+- `frontend/src/lib/api.ts` — API client
+- `frontend/src/lib/types.ts` — shared type definitions
+- `frontend/src/lib/mock.ts` — fallback mock data (keep working)
+
+---
+
+## Git Rules (All Stages)
+- Never run git push, git commit, or git add automatically
+- Never touch git without explicit instruction from the architect
+- All version control decisions are made by the architect only

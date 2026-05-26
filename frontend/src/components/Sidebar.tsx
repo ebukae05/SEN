@@ -151,9 +151,11 @@ export function Sidebar() {
           isCollapsed={isCollapsed}
         />
         <NavItem
+          to="/alerts"
           icon={AlertTriangle}
           label="Alerts"
           badge="7"
+          active={pathname === "/alerts"}
           isCollapsed={isCollapsed}
         />
         <NavItem
@@ -165,8 +167,20 @@ export function Sidebar() {
         />
 
         <SectionLabel isCollapsed={isCollapsed}>Analysis</SectionLabel>
-        <NavItem icon={LineChart} label="Trends" isCollapsed={isCollapsed} />
-        <NavItem icon={Gauge} label="Diagnostics" isCollapsed={isCollapsed} />
+        <NavItem
+          to="/trends"
+          icon={LineChart}
+          label="Trends"
+          active={pathname === "/trends"}
+          isCollapsed={isCollapsed}
+        />
+        <NavItem
+          to="/diagnostics"
+          icon={Gauge}
+          label="Diagnostics"
+          active={pathname === "/diagnostics"}
+          isCollapsed={isCollapsed}
+        />
         <NavItem
           to="/recommendations"
           icon={FileText}
