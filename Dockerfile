@@ -41,6 +41,7 @@ RUN mkdir -p data/processed outputs/reports logs \
 
 EXPOSE 8000
 
-# Shell form so ${PORT} expands at runtime — Railway injects a dynamic PORT;
-# locally and in docker-compose, fall back to 8000.
-CMD uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Explicit sh -c exec form so ${PORT} always expands — some platforms (Railway)
+# bypass the shell-form CMD wrapping and pass $PORT through literally.
+# Locally and in docker-compose, fall back to 8000.
+CMD ["sh", "-c", "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
