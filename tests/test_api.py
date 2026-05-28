@@ -21,6 +21,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+TEST_API_KEY = "test-key-for-pytest-only"
+os.environ.setdefault("SEN_API_KEY", TEST_API_KEY)
+
 from agents import get_active_dataframe  # noqa: E402
 from api.main import app  # noqa: E402
 from ingestion.store import LocalFilesystemStore, set_store  # noqa: E402
@@ -28,8 +31,15 @@ from ingestion.store import LocalFilesystemStore, set_store  # noqa: E402
 
 @pytest.fixture(scope="module")
 def client() -> TestClient:
-    """FastAPI test client (in-process, no socket)."""
-    return TestClient(app)
+    """FastAPI test client (in-process, no socket).
+
+    Pre-loaded with the X-API-Key header so the existing endpoint tests
+    don't need to know about auth. Tests that care about auth use a fresh
+    TestClient instance directly.
+    """
+    tc = TestClient(app)
+    tc.headers.update({"X-API-Key": TEST_API_KEY})
+    return tc
 
 
 @pytest.fixture(scope="module")
@@ -45,6 +55,33 @@ class TestHealth:
         response = client.get("/health")
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
+
+
+class TestAuth:
+    """API key authentication on protected vs. public endpoints."""
+
+    def test_health_is_public(self) -> None:
+        # No header attached — /health is in security.public_endpoints
+        tc = TestClient(app)
+        response = tc.get("/health")
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok"}
+
+    def test_engines_without_key_returns_401(self) -> None:
+        tc = TestClient(app)
+        response = tc.get("/engines")
+        assert response.status_code == 401
+
+    def test_engines_with_valid_key_returns_200(self) -> None:
+        tc = TestClient(app)
+        response = tc.get("/engines", headers={"X-API-Key": TEST_API_KEY})
+        assert response.status_code == 200
+        assert isinstance(response.json(), list)
+
+    def test_engines_with_invalid_key_returns_401(self) -> None:
+        tc = TestClient(app)
+        response = tc.get("/engines", headers={"X-API-Key": "wrong-key"})
+        assert response.status_code == 401
 
 
 class TestEngines:

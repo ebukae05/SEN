@@ -175,6 +175,15 @@ api:
   cors_origins:
     - "*"
 
+security:
+  api_key_env: SEN_API_KEY
+  api_key_header: X-API-Key
+  public_endpoints:
+    - /health
+    - /docs
+    - /openapi.json
+    - /redoc
+
 logging:
   level: INFO
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

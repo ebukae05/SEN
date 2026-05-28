@@ -74,7 +74,9 @@
       "Bash(venv/Scripts/pip.exe show *)",
       "Bash(./venv/Scripts/python.exe data/test/generate_synthetic.py)",
       "Bash(./venv/Scripts/python.exe -c ' *)",
-      "Bash(./venv/Scripts/python.exe -m pytest tests/test_agents.py tests/test_api.py tests/test_ingestion.py -x --tb=short)"
+      "Bash(./venv/Scripts/python.exe -m pytest tests/test_agents.py tests/test_api.py tests/test_ingestion.py -x --tb=short)",
+      "Bash(docker build *)",
+      "Bash(./venv/Scripts/python.exe -m pytest tests/test_api.py -x -q)"
     ]
   }
 }

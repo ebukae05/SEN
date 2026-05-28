@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from agents import active_dataset, get_active_dataframe, load_config
+from api.auth import verify_api_key
 from api.ingestion_routes import router as ingestion_router
 from crews.maintenance_crew import run_pipeline
 from ingestion.heuristic import (
@@ -62,6 +63,7 @@ def _build_app() -> FastAPI:
         title="SEN — Sensor Engine Network",
         description="Real-time predictive maintenance API.",
         version="1.0.0",
+        dependencies=[Depends(verify_api_key)],
     )
     app.add_middleware(
         CORSMiddleware,
