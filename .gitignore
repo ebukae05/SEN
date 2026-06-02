@@ -17,6 +17,9 @@ venv/
 .venv/
 env/
 
+# Node — only frontend/ should have node_modules; the root must not
+node_modules/
+
 # Processed data (generated, not source-controlled)
 data/processed/
 

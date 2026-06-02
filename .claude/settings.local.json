@@ -76,7 +76,8 @@
       "Bash(./venv/Scripts/python.exe -c ' *)",
       "Bash(./venv/Scripts/python.exe -m pytest tests/test_agents.py tests/test_api.py tests/test_ingestion.py -x --tb=short)",
       "Bash(docker build *)",
-      "Bash(./venv/Scripts/python.exe -m pytest tests/test_api.py -x -q)"
+      "Bash(./venv/Scripts/python.exe -m pytest tests/test_api.py -x -q)",
+      "Read(//tmp/**)"
     ]
   }
 }

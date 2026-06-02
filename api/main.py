@@ -103,6 +103,8 @@ def root() -> dict[str, object]:
             "ingest_schema": "POST /ingest/schema",
             "ingest_datasets": "GET /ingest/datasets",
             "ingest_delete": "DELETE /ingest/dataset/{id}",
+            "ingest_stream": "POST /ingest/stream/{dataset_id}",
+            "ingest_stream_latest": "GET /ingest/stream/{dataset_id}/{unit_id}/latest",
         },
     }
 

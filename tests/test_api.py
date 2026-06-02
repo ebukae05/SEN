@@ -27,6 +27,7 @@ os.environ.setdefault("SEN_API_KEY", TEST_API_KEY)
 from agents import get_active_dataframe  # noqa: E402
 from api.main import app  # noqa: E402
 from ingestion.store import LocalFilesystemStore, set_store  # noqa: E402
+from ingestion.stream import reset_buffers  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -278,6 +279,75 @@ class TestIngestDatasets:
         self, client: TestClient, isolated_store: LocalFilesystemStore
     ) -> None:
         response = client.delete("/ingest/dataset/nonexistent-xxxxxx")
+        assert response.status_code == 404
+
+
+class TestStream:
+    """POST /ingest/stream/{dataset_id} and GET .../latest."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_buffers(self) -> None:
+        reset_buffers()
+
+    def test_unknown_dataset_returns_404(self, client: TestClient) -> None:
+        response = client.post(
+            "/ingest/stream/nonexistent-xxxxxx",
+            json={"unit_id": 1, "cycle": 0, "sensors": {"vib_de": 1.0}},
+        )
+        assert response.status_code == 404
+
+    def test_cmapss_dataset_accepts_reading(self, client: TestClient) -> None:
+        response = client.post(
+            "/ingest/stream/FD001",
+            json={"unit_id": 1, "cycle": 0, "sensors": {"s2": 0.4}},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["dataset_id"] == "FD001"
+        assert body["unit_id"] == 1
+        assert body["buffer_size"] == 1
+        # Single reading isn't enough to fit a slope yet.
+        assert body["status"] is None
+
+    def test_multiple_readings_grow_buffer_and_yield_status(
+        self, client: TestClient
+    ) -> None:
+        for cycle in range(5):
+            response = client.post(
+                "/ingest/stream/FD001",
+                json={
+                    "unit_id": 7,
+                    "cycle": cycle,
+                    "sensors": {"vib_de": 1.0 + 0.05 * cycle, "temp": 60 + cycle},
+                },
+            )
+            assert response.status_code == 200
+        body = response.json()
+        assert body["buffer_size"] == 5
+        assert body["status"] is not None
+        assert body["status"]["engine_id"] == 7
+        assert body["status"]["severity"] in {"healthy", "watch", "critical"}
+        assert body["status"]["threshold"] > 0
+
+    def test_stream_requires_api_key(self) -> None:
+        tc = TestClient(app)
+        response = tc.post(
+            "/ingest/stream/FD001",
+            json={"unit_id": 1, "cycle": 0, "sensors": {"x": 1.0}},
+        )
+        assert response.status_code == 401
+
+    def test_latest_returns_empty_snapshot_for_untracked_unit(
+        self, client: TestClient
+    ) -> None:
+        response = client.get("/ingest/stream/FD001/42/latest")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["buffer_size"] == 0
+        assert body["status"] is None
+
+    def test_latest_unknown_dataset_returns_404(self, client: TestClient) -> None:
+        response = client.get("/ingest/stream/nonexistent-xxxxxx/1/latest")
         assert response.status_code == 404
 
 

@@ -30,6 +30,11 @@ from ingestion.store import (
     SensorSchema,
     get_store,
 )
+from ingestion.stream import (
+    StreamSnapshot,
+    append_reading,
+    get_snapshot,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -241,3 +246,87 @@ def delete_dataset(dataset_id: str) -> None:
         raise HTTPException(400, "CMAPSS datasets cannot be deleted")
     if not get_store().delete_dataset(dataset_id):
         raise HTTPException(404, f"Dataset not found: {dataset_id}")
+
+
+class StreamReadingIn(BaseModel):
+    """One real-time reading published to /ingest/stream/{dataset_id}."""
+
+    unit_id: int = Field(..., gt=0, description="Asset / engine identifier")
+    cycle: int = Field(..., ge=0, description="Monotonic cycle index for the reading")
+    sensors: dict[str, float] = Field(
+        ..., description="Sensor name → numeric reading for this cycle"
+    )
+
+
+class StreamStatusOut(BaseModel):
+    """RUL/severity snapshot returned alongside a stream append."""
+
+    engine_id: int
+    predicted_rul: float
+    severity: str
+    alert: bool
+    threshold: float
+
+
+class StreamSnapshotOut(BaseModel):
+    """Response body for POST /ingest/stream/{dataset_id} and GET .../latest."""
+
+    dataset_id: str
+    unit_id: int
+    buffer_size: int
+    window_size: int
+    status: StreamStatusOut | None = None
+
+
+def _dataset_exists(dataset_id: str) -> bool:
+    """Return True if dataset_id is a known CMAPSS or persisted custom dataset."""
+    if not is_custom_dataset(dataset_id):
+        return True
+    return get_store().get_meta(dataset_id) is not None
+
+
+def _snapshot_to_out(snapshot: StreamSnapshot) -> StreamSnapshotOut:
+    """Convert a StreamSnapshot dataclass into its API shape."""
+    status_out: StreamStatusOut | None = None
+    if snapshot.status is not None:
+        status_out = StreamStatusOut(
+            engine_id=snapshot.status.engine_id,
+            predicted_rul=snapshot.status.predicted_rul,
+            severity=snapshot.status.severity,
+            alert=snapshot.status.alert,
+            threshold=snapshot.status.threshold,
+        )
+    return StreamSnapshotOut(
+        dataset_id=snapshot.dataset_id,
+        unit_id=snapshot.unit_id,
+        buffer_size=snapshot.buffer_size,
+        window_size=snapshot.window_size,
+        status=status_out,
+    )
+
+
+@router.post("/stream/{dataset_id}", response_model=StreamSnapshotOut)
+def stream_reading(dataset_id: str, payload: StreamReadingIn) -> StreamSnapshotOut:
+    """Append a single sensor reading to the in-memory stream buffer.
+
+    Returns the post-append buffer size and (once at least two readings exist
+    for the unit) the latest heuristic RUL/severity for that unit.
+    """
+    if not _dataset_exists(dataset_id):
+        raise HTTPException(404, f"Dataset not found: {dataset_id}")
+    snapshot = append_reading(
+        dataset_id, payload.unit_id, payload.cycle, payload.sensors
+    )
+    return _snapshot_to_out(snapshot)
+
+
+@router.get(
+    "/stream/{dataset_id}/{unit_id}/latest",
+    response_model=StreamSnapshotOut,
+)
+def stream_latest(dataset_id: str, unit_id: int) -> StreamSnapshotOut:
+    """Return the current in-memory snapshot for (dataset_id, unit_id)."""
+    if not _dataset_exists(dataset_id):
+        raise HTTPException(404, f"Dataset not found: {dataset_id}")
+    snapshot = get_snapshot(dataset_id, unit_id)
+    return _snapshot_to_out(snapshot)
