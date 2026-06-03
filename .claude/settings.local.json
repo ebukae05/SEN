@@ -79,7 +79,8 @@
       "Bash(./venv/Scripts/python.exe -m pytest tests/test_api.py -x -q)",
       "Read(//tmp/**)",
       "Bash(grep -E \"venv|\\\\.env$\")",
-      "Bash(VITE_API_BASE=http://127.0.0.1:8765 npm run dev)"
+      "Bash(VITE_API_BASE=http://127.0.0.1:8765 npm run dev)",
+      "Bash(powershell *)"
     ]
   }
 }
