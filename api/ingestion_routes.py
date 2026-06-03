@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import asdict
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 import yaml
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from agents import load_config
@@ -111,6 +112,10 @@ class DatasetMetaOut(BaseModel):
     sensor_display_names: dict[str, str] = {}
     label: str = ""
     error: str | None = None
+    training_rmse: float | None = None
+    trained_at: str | None = None
+    n_features_trained: int | None = None
+    training_error: str | None = None
 
 
 class ProcessOut(BaseModel):
@@ -330,3 +335,130 @@ def stream_latest(dataset_id: str, unit_id: int) -> StreamSnapshotOut:
         raise HTTPException(404, f"Dataset not found: {dataset_id}")
     snapshot = get_snapshot(dataset_id, unit_id)
     return _snapshot_to_out(snapshot)
+
+
+class TrainTriggerOut(BaseModel):
+    """Response body for POST /ingest/dataset/{id}/train (202 Accepted)."""
+
+    dataset_id: str
+    status: str
+    message: str
+
+
+class TrainingStatusOut(BaseModel):
+    """Response body for GET /ingest/dataset/{id}/training."""
+
+    dataset_id: str
+    status: str
+    training_rmse: float | None = None
+    trained_at: str | None = None
+    n_features_trained: int | None = None
+    training_error: str | None = None
+
+
+def _utc_now_iso() -> str:
+    """Current UTC timestamp as an ISO-8601 string with seconds precision."""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _run_training(dataset_id: str) -> None:
+    """Background-task body: run train_custom and persist the outcome to meta.
+
+    Catches all exceptions so failures land in ``meta.training_error`` rather
+    than vanishing into the FastAPI background-task void. Successful runs bust
+    the predict_tools model cache so the next inference loads fresh weights.
+    """
+    from models.train import train_custom
+
+    store = get_store()
+    try:
+        result = train_custom(dataset_id)
+    except Exception as exc:  # noqa: BLE001 — background tasks must record any failure
+        logger.exception("Training failed for dataset %s", dataset_id)
+        meta = store.get_meta(dataset_id)
+        if meta is not None:
+            meta.status = "training_failed"
+            meta.training_error = str(exc)
+            store.save_meta(meta)
+        return
+    meta = store.get_meta(dataset_id)
+    if meta is None:
+        logger.error("Meta vanished after training %s; weights orphaned", dataset_id)
+        return
+    meta.status = "trained"
+    meta.training_rmse = float(result["rmse"])
+    meta.trained_at = _utc_now_iso()
+    meta.n_features_trained = int(result["n_features"])
+    meta.training_error = None
+    store.save_meta(meta)
+    try:
+        from tools.predict_tools import clear_model_cache
+
+        clear_model_cache(dataset_id)
+    except ImportError:
+        pass
+    logger.info("Training complete for %s: rmse=%.3f", dataset_id, result["rmse"])
+
+
+@router.post(
+    "/dataset/{dataset_id}/train",
+    response_model=TrainTriggerOut,
+    status_code=202,
+)
+def trigger_training(
+    dataset_id: str, background_tasks: BackgroundTasks
+) -> TrainTriggerOut:
+    """Kick off per-tenant CNN-LSTM fine-tuning as a background task.
+
+    Returns 202 immediately; poll ``GET /ingest/dataset/{id}/training`` for
+    completion. Rejects CMAPSS datasets (pretrained), unknown datasets,
+    in-flight trainings, and datasets without original RUL labels.
+    """
+    if not is_custom_dataset(dataset_id):
+        raise HTTPException(
+            400, "CMAPSS datasets ship pretrained; on-the-fly training is not supported"
+        )
+    store = get_store()
+    meta = store.get_meta(dataset_id)
+    if meta is None:
+        raise HTTPException(404, f"Dataset not found: {dataset_id}")
+    if meta.status == "training":
+        raise HTTPException(409, "Training already in progress for this dataset")
+    if not meta.has_rul:
+        raise HTTPException(
+            422,
+            "Dataset has no original RUL labels. Per-tenant training requires "
+            "labeled run-to-failure data; unsupervised mode is not yet "
+            "implemented.",
+        )
+    meta.status = "training"
+    meta.training_error = None
+    store.save_meta(meta)
+    background_tasks.add_task(_run_training, dataset_id)
+    logger.info("Queued training for dataset %s", dataset_id)
+    return TrainTriggerOut(
+        dataset_id=dataset_id,
+        status="training",
+        message="Training started; poll /ingest/dataset/{id}/training for completion",
+    )
+
+
+@router.get(
+    "/dataset/{dataset_id}/training",
+    response_model=TrainingStatusOut,
+)
+def get_training_status(dataset_id: str) -> TrainingStatusOut:
+    """Return the current training status and last-completed training metrics."""
+    if not is_custom_dataset(dataset_id):
+        raise HTTPException(400, "CMAPSS datasets have no training lifecycle")
+    meta = get_store().get_meta(dataset_id)
+    if meta is None:
+        raise HTTPException(404, f"Dataset not found: {dataset_id}")
+    return TrainingStatusOut(
+        dataset_id=dataset_id,
+        status=meta.status,
+        training_rmse=meta.training_rmse,
+        trained_at=meta.trained_at,
+        n_features_trained=meta.n_features_trained,
+        training_error=meta.training_error,
+    )

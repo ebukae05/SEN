@@ -1,21 +1,60 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, ArrowUpRight, Bell, Clock } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Bell, Clock, WifiOff } from "lucide-react";
 import { SeverityBadge } from "../components/SeverityBadge";
-import { Sparkline } from "../components/Sparkline";
-import { makeMockFleet } from "../lib/mock";
+import { api } from "../lib/api";
 import { cn } from "../lib/cn";
-import type { FleetEngine } from "../lib/types";
+import { makeMockFleet } from "../lib/mock";
+import type { AlertEvent, FleetEngine, Severity } from "../lib/types";
+
+type AlertSource = "live" | "mock" | "loading";
+
+interface DisplayAlert {
+  key: string;
+  dataset_id: string;
+  unit_id: number;
+  severity: Severity;
+  previous_severity: Severity | null;
+  title: string;
+  detail: string;
+  timestamp: string | null;
+  cycles_ago: number | null;
+}
 
 export function Alerts() {
-  const engines = useMemo(() => makeMockFleet(100), []);
-  const alerts = useMemo(
-    () =>
-      engines
-        .filter((e) => e.severity !== "healthy")
-        .sort((a, b) => a.predicted_rul - b.predicted_rul),
-    [engines],
-  );
+  const [events, setEvents] = useState<AlertEvent[] | null>(null);
+  const [source, setSource] = useState<AlertSource>("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listRecentAlerts(50)
+      .then((data) => {
+        if (cancelled) return;
+        setEvents(data);
+        setSource("live");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setEvents(null);
+        setSource("mock");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const mockFallback = useMemo(() => makeMockFleet(100), []);
+
+  const alerts: DisplayAlert[] = useMemo(() => {
+    if (source === "live" && events) {
+      return events.map(eventToDisplay);
+    }
+    return mockFallback
+      .filter((e) => e.severity !== "healthy")
+      .sort((a, b) => a.predicted_rul - b.predicted_rul)
+      .map(engineToDisplay);
+  }, [source, events, mockFallback]);
 
   const criticalCount = alerts.filter((a) => a.severity === "critical").length;
   const warningCount = alerts.filter((a) => a.severity === "warning").length;
@@ -31,9 +70,8 @@ export function Alerts() {
             Threshold breaches and degradation warnings
           </h1>
           <p className="max-w-2xl text-[13px] text-text-dim">
-            Engines whose predicted RUL has crossed an operating threshold or
-            whose degradation rate signals impending failure. Acknowledge to
-            silence; resolve once maintenance is scheduled.
+            Severity transitions dispatched from the streaming hot path.
+            Acknowledge to silence; resolve once maintenance is scheduled.
           </p>
           <div className="mt-2 flex items-center gap-2 font-mono text-[11px] text-text-faint">
             <span className="rounded-md border border-status-red/25 bg-status-red/10 px-2 py-0.5 text-status-red">
@@ -45,6 +83,12 @@ export function Alerts() {
             <span className="rounded-md border border-border bg-surface-2 px-2 py-0.5 text-text-dim">
               {alerts.length} total
             </span>
+            {source === "mock" && (
+              <span className="flex items-center gap-1 rounded-md border border-border bg-surface-2 px-2 py-0.5 text-text-faint">
+                <WifiOff className="h-3 w-3" />
+                mock fallback
+              </span>
+            )}
           </div>
         </div>
 
@@ -56,7 +100,7 @@ export function Alerts() {
                 Alert queue
               </span>
               <span className="font-mono text-[11px] text-text-faint">
-                sorted by urgency
+                {source === "live" ? "newest first" : "sorted by urgency"}
               </span>
             </div>
             <button
@@ -66,36 +110,95 @@ export function Alerts() {
               Acknowledge all
             </button>
           </div>
-          <ul>
-            {alerts.map((engine, i) => (
-              <AlertRow
-                key={engine.engine_id}
-                engine={engine}
-                divider={i < alerts.length - 1}
-              />
-            ))}
-          </ul>
+          {source === "loading" ? (
+            <div className="px-4 py-10 text-center text-[12px] text-text-faint">
+              Loading recent alerts…
+            </div>
+          ) : alerts.length === 0 ? (
+            <div className="px-4 py-10 text-center text-[12px] text-text-faint">
+              No alerts in the recent log.
+            </div>
+          ) : (
+            <ul>
+              {alerts.map((alert, i) => (
+                <AlertRow
+                  key={alert.key}
+                  alert={alert}
+                  divider={i < alerts.length - 1}
+                />
+              ))}
+            </ul>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function AlertRow({
-  engine,
-  divider,
-}: {
-  engine: FleetEngine;
-  divider: boolean;
-}) {
-  const color =
-    engine.severity === "critical" ? "#EF4444" : "#F59E0B";
+function eventToDisplay(event: AlertEvent): DisplayAlert {
+  const prev = event.previous_severity ?? "unknown";
+  const title =
+    event.current_severity === "critical"
+      ? `RUL ${event.predicted_rul.toFixed(0)} dropped below ${event.threshold.toFixed(0)}`
+      : `Severity escalated to ${event.current_severity}`;
+  const detail = `${event.dataset_id} unit ${event.unit_id} · ${prev} → ${event.current_severity} · cycle ${event.cycle}`;
+  return {
+    key: `${event.dataset_id}-${event.unit_id}-${event.cycle}-${event.timestamp}`,
+    dataset_id: event.dataset_id,
+    unit_id: event.unit_id,
+    severity: event.current_severity,
+    previous_severity: event.previous_severity,
+    title,
+    detail,
+    timestamp: event.timestamp,
+    cycles_ago: null,
+  };
+}
+
+function engineToDisplay(engine: FleetEngine): DisplayAlert {
   const title =
     engine.severity === "critical"
       ? "RUL below safety threshold"
       : "Degradation rate exceeds nominal";
+  const cycles_ago = Math.max(
+    1,
+    Math.round(Math.abs(engine.degradation_rate) * 4),
+  );
+  return {
+    key: `mock-${engine.engine_id}`,
+    dataset_id: "FD001",
+    unit_id: engine.engine_id,
+    severity: engine.severity,
+    previous_severity: null,
+    title,
+    detail: `RUL ${engine.predicted_rul.toFixed(0)} cycles · Δ ${engine.degradation_rate.toFixed(2)} / cycle`,
+    timestamp: null,
+    cycles_ago,
+  };
+}
 
-  const cyclesAgo = Math.max(1, Math.round(Math.abs(engine.degradation_rate) * 4));
+function formatRelativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "—";
+  const diffSec = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (diffSec < 60) return `${diffSec}s ago`;
+  if (diffSec < 3600) return `${Math.round(diffSec / 60)}m ago`;
+  if (diffSec < 86400) return `${Math.round(diffSec / 3600)}h ago`;
+  return `${Math.round(diffSec / 86400)}d ago`;
+}
+
+function AlertRow({
+  alert,
+  divider,
+}: {
+  alert: DisplayAlert;
+  divider: boolean;
+}) {
+  const timeLabel = alert.timestamp
+    ? formatRelativeTime(alert.timestamp)
+    : alert.cycles_ago != null
+      ? `${alert.cycles_ago}c ago`
+      : "—";
 
   return (
     <li
@@ -107,7 +210,7 @@ function AlertRow({
       <div
         className={cn(
           "flex h-8 w-8 shrink-0 items-center justify-center rounded-md border",
-          engine.severity === "critical"
+          alert.severity === "critical"
             ? "border-status-red/30 bg-status-red/10"
             : "border-status-amber/30 bg-status-amber/10",
         )}
@@ -115,7 +218,7 @@ function AlertRow({
         <AlertTriangle
           className={cn(
             "h-4 w-4",
-            engine.severity === "critical"
+            alert.severity === "critical"
               ? "text-status-red"
               : "text-status-amber",
           )}
@@ -123,31 +226,26 @@ function AlertRow({
       </div>
 
       <Link
-        to={`/engine/${engine.engine_id}`}
+        to={`/engine/${alert.unit_id}`}
         className="font-mono text-[14px] font-semibold text-text hover:text-violet-glow"
       >
-        #{String(engine.engine_id).padStart(3, "0")}
+        #{String(alert.unit_id).padStart(3, "0")}
       </Link>
 
       <div className="flex min-w-0 flex-1 flex-col leading-tight">
-        <span className="truncate text-[13px] text-text">{title}</span>
-        <span className="text-[11px] text-text-faint">
-          RUL {engine.predicted_rul.toFixed(0)} cycles · Δ{" "}
-          {engine.degradation_rate.toFixed(2)} / cycle
-        </span>
+        <span className="truncate text-[13px] text-text">{alert.title}</span>
+        <span className="truncate text-[11px] text-text-faint">{alert.detail}</span>
       </div>
 
-      <Sparkline data={engine.trend} color={color} width={64} height={20} />
-
-      <SeverityBadge severity={engine.severity} />
+      <SeverityBadge severity={alert.severity} />
 
       <div className="flex items-center gap-1 font-mono text-[11px] text-text-faint">
         <Clock className="h-3 w-3" />
-        {cyclesAgo}c ago
+        {timeLabel}
       </div>
 
       <Link
-        to={`/engine/${engine.engine_id}`}
+        to={`/engine/${alert.unit_id}`}
         className="flex items-center gap-1 rounded-md border border-border bg-surface-2 px-2.5 py-1 text-[11px] text-text-dim hover:border-violet/40 hover:text-violet-glow"
       >
         Inspect

@@ -177,3 +177,16 @@ export interface ProcessResult {
   errors: string[];
   warnings: string[];
 }
+
+// ─── Alerts (Stage 3) ───────────────────────────────────────────────────────
+
+export interface AlertEvent {
+  dataset_id: string;
+  unit_id: number;
+  cycle: number;
+  previous_severity: Severity | null;
+  current_severity: Severity;
+  predicted_rul: number;
+  threshold: number;
+  timestamp: string;
+}

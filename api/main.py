@@ -27,7 +27,8 @@ from ingestion.heuristic import (
     is_custom_dataset,
     load_custom_dataframe,
 )
-from tools.predict_tools import check_thresholds, predict_rul
+from ingestion.store import get_store
+from tools.predict_tools import check_thresholds, predict_rul, predict_rul_custom
 from tools.stream_tools import stream_sensors
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,8 @@ def root() -> dict[str, object]:
             "ingest_delete": "DELETE /ingest/dataset/{id}",
             "ingest_stream": "POST /ingest/stream/{dataset_id}",
             "ingest_stream_latest": "GET /ingest/stream/{dataset_id}/{unit_id}/latest",
+            "ingest_train": "POST /ingest/dataset/{dataset_id}/train",
+            "ingest_training_status": "GET /ingest/dataset/{dataset_id}/training",
             "alerts_recent": "GET /alerts/recent",
             "alerts_test": "POST /alerts/test",
             "alerts_sinks": "GET /alerts/sinks",
@@ -127,12 +130,55 @@ def list_engines(dataset: str | None = Query(default=None)) -> list[int]:
     return sorted(int(unit_id) for unit_id in df["unit_id"].unique())
 
 
+def _custom_model_status(
+    df, dataset_id: str, engine_id: int
+) -> EngineStatus:
+    """Build EngineStatus from a per-tenant trained CNN-LSTM prediction.
+
+    Falls back to the heuristic if the schema is missing — weights existing
+    without a schema would be a corrupted state, but we'd rather degrade than
+    500 in that case.
+    """
+    store = get_store()
+    schema = store.get_schema(dataset_id)
+    if schema is None:
+        status = compute_engine_status(df, engine_id)
+        return EngineStatus(
+            engine_id=status.engine_id,
+            predicted_rul=status.predicted_rul,
+            severity=status.severity,
+            alert=status.alert,
+            threshold=status.threshold,
+        )
+    sensor_cols = [m.column_name for m in schema.mappings if m.role == "sensor"]
+    rul = predict_rul_custom(df, dataset_id, engine_id, sensor_cols)
+    config = load_config()
+    severity_cfg = config["monitoring"]["severity"]
+    threshold = float(config["monitoring"]["rul_alert_threshold"])
+    if rul < severity_cfg["critical_below"]:
+        severity = "critical"
+    elif rul < severity_cfg["watch_below"]:
+        severity = "watch"
+    else:
+        severity = "healthy"
+    return EngineStatus(
+        engine_id=engine_id,
+        predicted_rul=rul,
+        severity=severity,
+        alert=rul < threshold,
+        threshold=threshold,
+    )
+
+
 def _latest_status(engine_id: int, dataset_id: str | None) -> EngineStatus:
     """Compute the latest RUL + alert payload for one engine_id."""
     df = _resolve_dataframe(dataset_id)
     if engine_id not in df["unit_id"].values:
         raise HTTPException(404, f"engine_id {engine_id} not found")
     if dataset_id and is_custom_dataset(dataset_id):
+        weights_path = get_store().get_weights_path(dataset_id)
+        if weights_path.exists():
+            return _custom_model_status(df, dataset_id, engine_id)
         status = compute_engine_status(df, engine_id)
         return EngineStatus(
             engine_id=status.engine_id,

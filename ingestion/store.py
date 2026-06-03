@@ -12,6 +12,7 @@ Directory layout per dataset (LocalFilesystemStore):
         meta.json        dataset metadata
         processed.csv    normalized + RUL-labeled output
         scaler.pkl       fitted MinMaxScaler
+        weights.pt       per-tenant CNN-LSTM weights (optional, post-training)
 """
 
 from __future__ import annotations
@@ -74,7 +75,13 @@ class SensorSchema:
 
 @dataclass
 class DatasetMeta:
-    """Persisted metadata about an uploaded dataset."""
+    """Persisted metadata about an uploaded dataset.
+
+    `status` lifecycle:
+        pending -> ready (after ingestion)
+        ready -> training -> trained | training_failed (post Goal-3 fine-tuning)
+        failed (ingestion never produced a usable dataset)
+    """
 
     dataset_id: str
     asset_id: str
@@ -90,6 +97,10 @@ class DatasetMeta:
     has_rul: bool = False
     sensor_display_names: dict[str, str] = field(default_factory=dict)
     error: str | None = None
+    training_rmse: float | None = None
+    trained_at: str | None = None
+    n_features_trained: int | None = None
+    training_error: str | None = None
 
 
 def _slugify(text: str) -> str:
@@ -168,6 +179,10 @@ class StoreBackend(ABC):
         """Return the scaler pickle path for a dataset."""
 
     @abstractmethod
+    def get_weights_path(self, dataset_id: str) -> Path:
+        """Return the per-dataset model-weights path (may not yet exist)."""
+
+    @abstractmethod
     def delete_dataset(self, dataset_id: str) -> bool:
         """Remove all artifacts for a dataset. Returns True if anything was removed."""
 
@@ -180,6 +195,7 @@ class LocalFilesystemStore(StoreBackend):
     SCHEMA_FILE = "schema.json"
     PROCESSED_FILE = "processed.csv"
     SCALER_FILE = "scaler.pkl"
+    WEIGHTS_FILE = "weights.pt"
 
     def __init__(self, root: Path) -> None:
         self.root = root
@@ -263,6 +279,9 @@ class LocalFilesystemStore(StoreBackend):
 
     def get_scaler_path(self, dataset_id: str) -> Path:
         return self._dataset_dir(dataset_id) / self.SCALER_FILE
+
+    def get_weights_path(self, dataset_id: str) -> Path:
+        return self._dataset_dir(dataset_id) / self.WEIGHTS_FILE
 
     def delete_dataset(self, dataset_id: str) -> bool:
         dataset_dir = self._dataset_dir(dataset_id)

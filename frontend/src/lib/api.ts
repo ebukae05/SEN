@@ -1,9 +1,11 @@
 import type {
+  AlertEvent,
   AnalyzeResponse,
   DatasetMeta,
   EngineStatus,
   ProcessResult,
   SensorSchemaPayload,
+  Severity,
   UploadPreview,
 } from "./types";
 
@@ -34,6 +36,29 @@ function withDataset(path: string, datasetId?: string): string {
   if (!datasetId) return path;
   const join = path.includes("?") ? "&" : "?";
   return `${path}${join}dataset=${encodeURIComponent(datasetId)}`;
+}
+
+// Backend uses "watch" for medium severity; the rest of the UI calls it
+// "warning". Normalize at the API boundary so components stay simple.
+type BackendSeverity = "healthy" | "watch" | "critical" | Severity;
+
+interface RawAlertEvent extends Omit<AlertEvent, "previous_severity" | "current_severity"> {
+  previous_severity: BackendSeverity | null;
+  current_severity: BackendSeverity;
+}
+
+function normalizeSeverity(s: BackendSeverity | null): Severity | null {
+  if (s === null) return null;
+  if (s === "watch") return "warning";
+  return s as Severity;
+}
+
+function normalizeAlert(raw: RawAlertEvent): AlertEvent {
+  return {
+    ...raw,
+    previous_severity: normalizeSeverity(raw.previous_severity),
+    current_severity: normalizeSeverity(raw.current_severity) ?? "warning",
+  };
 }
 
 export const api = {
@@ -75,6 +100,11 @@ export const api = {
     }),
 
   listDatasets: () => request<DatasetMeta[]>("/ingest/datasets"),
+
+  listRecentAlerts: async (limit = 50): Promise<AlertEvent[]> => {
+    const events = await request<RawAlertEvent[]>(`/alerts/recent?limit=${limit}`);
+    return events.map(normalizeAlert);
+  },
 
   deleteDataset: async (datasetId: string): Promise<void> => {
     const res = await fetch(

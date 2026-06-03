@@ -12,6 +12,7 @@ import io
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -22,7 +23,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 TEST_API_KEY = "test-key-for-pytest-only"
-os.environ.setdefault("SEN_API_KEY", TEST_API_KEY)
+# Force the test key into the environment. `setdefault` was insufficient
+# because test_agents.py loads .env via python-dotenv (transitively, through
+# the agents package), populating SEN_API_KEY with the production value
+# before this module is imported under the full suite.
+os.environ["SEN_API_KEY"] = TEST_API_KEY
 
 from agents import get_active_dataframe  # noqa: E402
 from api.main import app  # noqa: E402
@@ -456,6 +461,197 @@ class TestAlertsDispatcher:
         # normal maybe_dispatch path: stream the same transition twice in a
         # row and confirm the recent log doesn't double up beyond what
         # cooldown allows. Skip if heuristic doesn't yield critical.
+
+
+def _create_ready_dataset(
+    client: TestClient, asset_id: str, rul_column: str | None = "rul",
+    rows_per_unit: int = 80,
+) -> str:
+    """Upload + apply schema, return the dataset_id of the resulting custom dataset."""
+    upload = client.post(
+        "/ingest/upload",
+        files={"file": ("sample.csv", _csv_bytes(rows_per_unit=rows_per_unit), "text/csv")},
+    ).json()
+    mappings = [
+        {"column_name": "unit_id", "role": "unit_id"},
+        {"column_name": "cycle", "role": "cycle"},
+        {"column_name": "vib_de", "role": "sensor", "type_tag": "vibration"},
+        {"column_name": "vib_nde", "role": "sensor", "type_tag": "vibration"},
+        {"column_name": "bearing_temp", "role": "sensor", "type_tag": "temperature"},
+    ]
+    if rul_column is not None:
+        mappings.append({"column_name": "rul", "role": "rul"})
+    payload = {
+        "upload_id": upload["upload_id"],
+        "asset_id": asset_id,
+        "asset_type": "centrifugal_compressor",
+        "industry": "oil_gas",
+        "cycle_column": "cycle",
+        "unit_id_column": "unit_id",
+        "rul_column": rul_column,
+        "mappings": mappings,
+    }
+    body = client.post("/ingest/schema", json=payload).json()
+    return body["dataset_id"]
+
+
+class TestStoreWeightsPath:
+    """LocalFilesystemStore.get_weights_path layout."""
+
+    def test_weights_path_under_dataset_dir(self, tmp_path: Path) -> None:
+        store = LocalFilesystemStore(tmp_path / "custom")
+        path = store.get_weights_path("foo-abc123")
+        assert path.name == "weights.pt"
+        assert path.parent.name == "foo-abc123"
+
+    def test_weights_path_missing_until_written(self, tmp_path: Path) -> None:
+        store = LocalFilesystemStore(tmp_path / "custom")
+        assert not store.get_weights_path("foo-abc123").exists()
+
+
+@pytest.fixture
+def fast_training(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch train.py's config to 1 epoch + small batch so tests stay quick."""
+    from tools import predict_tools as predict_module
+    from models import train as train_module
+
+    real = train_module._load_config()
+    fast_cfg = {
+        **real,
+        "training": {**real["training"], "epochs": 1, "batch_size": 8},
+    }
+    train_module._load_config.cache_clear()
+    monkeypatch.setattr(train_module, "_load_config", lambda: fast_cfg)
+    predict_module.clear_model_cache()
+    yield
+    # _load_config is restored by monkeypatch teardown after this point;
+    # don't try to clear its lru_cache here (the lambda has no cache).
+    predict_module.clear_model_cache()
+
+
+class TestTrainingEndpoints:
+    """POST /ingest/dataset/{id}/train and GET .../training."""
+
+    def test_train_unknown_dataset_returns_404(
+        self, client: TestClient, isolated_store: LocalFilesystemStore
+    ) -> None:
+        response = client.post("/ingest/dataset/does-not-exist/train")
+        assert response.status_code == 404
+
+    def test_train_cmapss_rejected(
+        self, client: TestClient, isolated_store: LocalFilesystemStore
+    ) -> None:
+        response = client.post("/ingest/dataset/FD001/train")
+        assert response.status_code == 400
+
+    def test_status_unknown_dataset_returns_404(
+        self, client: TestClient, isolated_store: LocalFilesystemStore
+    ) -> None:
+        response = client.get("/ingest/dataset/does-not-exist/training")
+        assert response.status_code == 404
+
+    def test_train_without_rul_rejected(
+        self, client: TestClient, isolated_store: LocalFilesystemStore
+    ) -> None:
+        dataset_id = _create_ready_dataset(client, "compressor-norul", rul_column=None)
+        response = client.post(f"/ingest/dataset/{dataset_id}/train")
+        assert response.status_code == 422
+        body = response.json()
+        assert "RUL" in body["detail"] or "rul" in body["detail"].lower()
+
+    def test_train_requires_api_key(
+        self, isolated_store: LocalFilesystemStore
+    ) -> None:
+        tc = TestClient(app)
+        response = tc.post("/ingest/dataset/anything/train")
+        assert response.status_code == 401
+
+    def test_status_requires_api_key(
+        self, isolated_store: LocalFilesystemStore
+    ) -> None:
+        tc = TestClient(app)
+        response = tc.get("/ingest/dataset/anything/training")
+        assert response.status_code == 401
+
+    def test_train_persists_weights_and_marks_trained(
+        self,
+        client: TestClient,
+        isolated_store: LocalFilesystemStore,
+        fast_training: None,
+    ) -> None:
+        dataset_id = _create_ready_dataset(client, "compressor-train")
+        trigger = client.post(f"/ingest/dataset/{dataset_id}/train")
+        assert trigger.status_code == 202
+        assert trigger.json()["status"] == "training"
+        # TestClient runs BackgroundTasks synchronously after the response,
+        # so the next call observes the post-training state.
+        status = client.get(f"/ingest/dataset/{dataset_id}/training").json()
+        assert status["status"] == "trained"
+        assert status["training_rmse"] is not None
+        assert status["training_rmse"] >= 0.0
+        assert status["n_features_trained"] == 3
+        assert status["trained_at"] is not None
+        assert status["training_error"] is None
+        assert isolated_store.get_weights_path(dataset_id).exists()
+
+    def test_train_failure_records_error(
+        self,
+        client: TestClient,
+        isolated_store: LocalFilesystemStore,
+        fast_training: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from api import ingestion_routes
+
+        def _boom(dataset_id: str) -> dict[str, Any]:
+            raise RuntimeError("forced training failure")
+
+        # Patch the train_custom imported inside _run_training. The import is
+        # done lazily inside the function, so we patch on models.train.
+        from models import train as train_module
+        monkeypatch.setattr(train_module, "train_custom", _boom)
+
+        dataset_id = _create_ready_dataset(client, "compressor-fail")
+        client.post(f"/ingest/dataset/{dataset_id}/train")
+        status = client.get(f"/ingest/dataset/{dataset_id}/training").json()
+        assert status["status"] == "training_failed"
+        assert "forced training failure" in (status["training_error"] or "")
+
+
+class TestCustomModelInference:
+    """Engine status uses trained weights when present, heuristic otherwise."""
+
+    def test_status_uses_heuristic_when_no_weights(
+        self, client: TestClient, isolated_store: LocalFilesystemStore
+    ) -> None:
+        dataset_id = _create_ready_dataset(client, "compressor-noweights")
+        response = client.get(
+            f"/engine/1/status", params={"dataset": dataset_id}
+        )
+        assert response.status_code == 200
+        # Heuristic path returns a finite predicted_rul without needing weights.
+        assert "predicted_rul" in response.json()
+
+    def test_status_uses_model_after_training(
+        self,
+        client: TestClient,
+        isolated_store: LocalFilesystemStore,
+        fast_training: None,
+    ) -> None:
+        from tools import predict_tools as predict_module
+
+        dataset_id = _create_ready_dataset(client, "compressor-trained")
+        client.post(f"/ingest/dataset/{dataset_id}/train")
+        # Sanity: status confirms training finished + cache is fresh.
+        assert client.get(
+            f"/ingest/dataset/{dataset_id}/training"
+        ).json()["status"] == "trained"
+        response = client.get(
+            f"/engine/1/status", params={"dataset": dataset_id}
+        )
+        assert response.status_code == 200
+        # Trained model cache should hold an entry for this dataset.
+        assert f"custom:{dataset_id}" in predict_module._MODEL_CACHE
 
 
 @pytest.mark.skipif(
