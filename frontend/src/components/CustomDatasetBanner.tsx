@@ -3,6 +3,7 @@ import { useState } from "react";
 import { api } from "../lib/api";
 import { useDataset } from "../lib/datasetContext";
 import type { DatasetMeta } from "../lib/types";
+import { TrainingPanel } from "./TrainingPanel";
 
 const INDUSTRY_LABEL: Record<string, string> = {
   oil_gas: "Oil & Gas",
@@ -32,9 +33,20 @@ const ASSET_LABEL: Record<string, string> = {
   custom: "Custom",
 };
 
-export function CustomDatasetBanner({ dataset }: { dataset: DatasetMeta }) {
+export function CustomDatasetBanner({
+  dataset,
+  onTrainingComplete,
+}: {
+  dataset: DatasetMeta;
+  onTrainingComplete?: () => void | Promise<void>;
+}) {
   const { refresh, setActiveDatasetId } = useDataset();
   const [busy, setBusy] = useState(false);
+
+  const handleTrainingComplete = async () => {
+    await refresh();
+    if (onTrainingComplete) await onTrainingComplete();
+  };
 
   const handleDelete = async () => {
     if (!window.confirm(`Delete dataset "${dataset.asset_id}"?`)) return;
@@ -82,6 +94,7 @@ export function CustomDatasetBanner({ dataset }: { dataset: DatasetMeta }) {
         <Stat label="Rows" value={dataset.row_count.toLocaleString()} />
         <Stat label="RUL" value={dataset.has_rul ? "Labeled" : "Heuristic"} />
       </div>
+      <TrainingPanel dataset={dataset} onTrainingComplete={handleTrainingComplete} />
     </div>
   );
 }

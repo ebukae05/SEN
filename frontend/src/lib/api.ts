@@ -6,6 +6,8 @@ import type {
   ProcessResult,
   SensorSchemaPayload,
   Severity,
+  TrainingStatus,
+  TrainingTriggerResponse,
   UploadPreview,
 } from "./types";
 
@@ -105,6 +107,17 @@ export const api = {
     const events = await request<RawAlertEvent[]>(`/alerts/recent?limit=${limit}`);
     return events.map(normalizeAlert);
   },
+
+  triggerTraining: (datasetId: string) =>
+    request<TrainingTriggerResponse>(
+      `/ingest/dataset/${encodeURIComponent(datasetId)}/train`,
+      { method: "POST" },
+    ),
+
+  getTrainingStatus: (datasetId: string) =>
+    request<TrainingStatus>(
+      `/ingest/dataset/${encodeURIComponent(datasetId)}/training`,
+    ),
 
   deleteDataset: async (datasetId: string): Promise<void> => {
     const res = await fetch(

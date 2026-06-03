@@ -152,6 +152,14 @@ export interface UploadPreview {
   suggestions: Record<string, ColumnRole>;
 }
 
+export type TrainingPhase =
+  | "pending"
+  | "ready"
+  | "training"
+  | "trained"
+  | "training_failed"
+  | "failed";
+
 export interface DatasetMeta {
   dataset_id: string;
   asset_id: string;
@@ -168,6 +176,25 @@ export interface DatasetMeta {
   sensor_display_names?: Record<string, string>;
   label: string;
   error?: string | null;
+  training_rmse?: number | null;
+  trained_at?: string | null;
+  n_features_trained?: number | null;
+  training_error?: string | null;
+}
+
+export interface TrainingStatus {
+  dataset_id: string;
+  status: TrainingPhase | string;
+  training_rmse: number | null;
+  trained_at: string | null;
+  n_features_trained: number | null;
+  training_error: string | null;
+}
+
+export interface TrainingTriggerResponse {
+  dataset_id: string;
+  status: string;
+  message: string;
 }
 
 export interface ProcessResult {

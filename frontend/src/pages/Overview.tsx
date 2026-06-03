@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { FleetSummaryBar } from "../components/FleetSummaryBar";
 import { FleetTable } from "../components/FleetTable";
 import { makeFleetFromIds, makeMockFleet } from "../lib/mock";
@@ -21,11 +21,21 @@ export function Overview() {
     buildMockFor(datasetId, isCustom, activeDataset?.engine_count),
   );
 
+  const loadEngines = useCallback(async () => {
+    if (!isCustom) return;
+    try {
+      const ids = await api.listEngines(datasetId);
+      if (ids.length === 0) return;
+      setEngines(makeFleetFromIds(ids, datasetId));
+    } catch {
+      // Mock already rendered — nothing to do.
+    }
+  }, [datasetId, isCustom]);
+
   useEffect(() => {
     let cancelled = false;
     // Always render mock immediately so the table never flashes empty.
     setEngines(buildMockFor(datasetId, isCustom, activeDataset?.engine_count));
-    // For custom datasets, replace with real engine IDs from the backend.
     if (!isCustom) return;
     api
       .listEngines(datasetId)
@@ -73,7 +83,10 @@ export function Overview() {
     >
       <div className="mx-auto flex max-w-7xl flex-col gap-8">
         {activeDataset?.source === "custom" ? (
-          <CustomDatasetBanner dataset={activeDataset} />
+          <CustomDatasetBanner
+            dataset={activeDataset}
+            onTrainingComplete={loadEngines}
+          />
         ) : (
           <Hero />
         )}
