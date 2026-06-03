@@ -334,7 +334,7 @@ export function Upload() {
                 </div>
               ) : (
                 <ProcessingStatus
-                  state={processState === "idle" ? "running" : processState}
+                  state={processState}
                   message={processMessage}
                   errors={processErrors}
                   datasetId={processedDatasetId}
