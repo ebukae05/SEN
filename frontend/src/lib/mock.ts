@@ -80,7 +80,7 @@ export function makeFleetFromIds(ids: number[], seed: number | string = 7): Flee
   return engines.sort((a, b) => a.predicted_rul - b.predicted_rul);
 }
 
-interface SensorDef {
+export interface SensorDef {
   name: string;
   label: string;
   drift: number;
@@ -180,7 +180,25 @@ function smooth(series: number[], window = 5): number[] {
   return out;
 }
 
-export function makeMockEngineDetail(engine: FleetEngine): EngineDetail {
+const DRIFT_CYCLE = [0.85, 0.92, 0.78, -0.65, -0.55, 0.7, 0.6, -0.4, 0.5, -0.3];
+
+export function buildSensorDefsFromMap(
+  displayNames: Record<string, string>,
+): SensorDef[] {
+  return Object.entries(displayNames).map(([col, label], i) => ({
+    name: col,
+    label: label || col,
+    drift: DRIFT_CYCLE[i % DRIFT_CYCLE.length],
+    description: `${label || col} (${col}) — sensor channel ingested from the uploaded dataset.`,
+    why_it_matters: `Sustained drift in ${label || col} away from the baseline window typically precedes mechanical degradation. Track against fleet average for context.`,
+  }));
+}
+
+export function makeMockEngineDetail(
+  engine: FleetEngine,
+  overrideSensorDefs?: SensorDef[],
+): EngineDetail {
+  const defs = overrideSensorDefs && overrideSensorDefs.length > 0 ? overrideSensorDefs : SENSOR_DEFS;
   const rand = seededRandom(engine.engine_id * 17 + 3);
   const cycles = engine.last_cycle;
   const startRul = 130;
@@ -196,7 +214,7 @@ export function makeMockEngineDetail(engine: FleetEngine): EngineDetail {
   const severityScale =
     engine.severity === "critical" ? 1.0 : engine.severity === "warning" ? 0.55 : 0.25;
 
-  const sensors: SensorTrend[] = SENSOR_DEFS.map((def) => {
+  const sensors: SensorTrend[] = defs.map((def) => {
     const raw = Array.from({ length: cycles }, (_, k) => {
       const t = k / (cycles - 1);
       const eased = Math.pow(t, 1.4);
@@ -239,13 +257,18 @@ export function makeMockEngineDetail(engine: FleetEngine): EngineDetail {
     healthy: "No action required. Resume standard inspection cadence (every 200 cycles).",
   };
 
+  const top_contributors =
+    overrideSensorDefs && overrideSensorDefs.length > 0
+      ? overrideSensorDefs.slice(0, 3).map((d) => `${d.label} (${d.name})`)
+      : ["HPC Outlet Temp (s3)", "LPC Outlet Temp (s2)", "HPC Outlet Pressure (s7)"];
+
   return {
     ...engine,
     rul_history,
     sensors,
     diagnosis: sevText[engine.severity],
     recommendation: recText[engine.severity],
-    top_contributors: ["HPC Outlet Temp (s3)", "LPC Outlet Temp (s2)", "HPC Outlet Pressure (s7)"],
+    top_contributors,
   };
 }
 

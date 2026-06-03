@@ -5,18 +5,47 @@ import { LineChart } from "../components/LineChart";
 import { SeverityBadge } from "../components/SeverityBadge";
 import { SensorDetailModal } from "../components/SensorDetailModal";
 import { Sparkline } from "../components/Sparkline";
-import { makeMockEngineDetail, makeMockFleet } from "../lib/mock";
+import { buildSensorDefsFromMap, makeMockEngineDetail, makeMockFleet } from "../lib/mock";
+import { useDataset } from "../lib/datasetContext";
 import { cn } from "../lib/cn";
 import type { EngineDetail as Engine, SensorTrend } from "../lib/types";
+
+const ASSET_LABEL: Record<string, string> = {
+  turbofan_engine: "Turbofan",
+  centrifugal_compressor: "Centrifugal Compressor",
+  gas_turbine: "Gas Turbine",
+  steam_turbine: "Steam Turbine",
+  electric_motor: "Electric Motor",
+  pump: "Pump",
+  gearbox: "Gearbox",
+  wind_turbine_drivetrain: "Wind Turbine Drivetrain",
+  conveyor_drive: "Conveyor Drive",
+  crusher: "Crusher",
+  generator: "Generator",
+  custom: "Custom Asset",
+};
 
 export function EngineDetail() {
   const { id } = useParams<{ id: string }>();
   const engineId = Number(id);
+  const { activeDataset } = useDataset();
+  const isCustom = activeDataset?.source === "custom";
+  const sensorMap = activeDataset?.sensor_display_names;
+
   const detail = useMemo(() => {
     const fleet = makeMockFleet(100);
     const engine = fleet.find((e) => e.engine_id === engineId) ?? fleet[0];
-    return makeMockEngineDetail(engine);
-  }, [engineId]);
+    const overrideDefs =
+      isCustom && sensorMap && Object.keys(sensorMap).length > 0
+        ? buildSensorDefsFromMap(sensorMap)
+        : undefined;
+    return makeMockEngineDetail(engine, overrideDefs);
+  }, [engineId, isCustom, sensorMap]);
+
+  const subtitle = isCustom && activeDataset
+    ? `${activeDataset.asset_id} · ${ASSET_LABEL[activeDataset.asset_type] ?? activeDataset.asset_type}`
+    : "FD001 · Turbofan";
+
   const [activeSensor, setActiveSensor] = useState<SensorTrend | null>(null);
 
   const sevAccent =
@@ -43,7 +72,7 @@ export function EngineDetail() {
           Back to fleet
         </Link>
 
-        <Header detail={detail} sevAccent={sevAccent} />
+        <Header detail={detail} sevAccent={sevAccent} subtitle={subtitle} />
 
         <DegradationCard detail={detail} curveColor={curveColor} />
 
@@ -63,7 +92,15 @@ export function EngineDetail() {
   );
 }
 
-function Header({ detail, sevAccent }: { detail: Engine; sevAccent: string }) {
+function Header({
+  detail,
+  sevAccent,
+  subtitle,
+}: {
+  detail: Engine;
+  sevAccent: string;
+  subtitle: string;
+}) {
   return (
     <div className="lift relative overflow-hidden rounded-2xl border border-border bg-surface/70 p-6 backdrop-blur-sm">
       <div className="pointer-events-none absolute -top-32 -right-32 h-80 w-80 rounded-full"
@@ -84,7 +121,7 @@ function Header({ detail, sevAccent }: { detail: Engine; sevAccent: string }) {
             <h1 className="font-mono text-[44px] leading-none font-semibold tracking-tight text-text">
               #{String(detail.engine_id).padStart(3, "0")}
             </h1>
-            <span className="text-[13px] text-text-faint">FD001 · Turbofan</span>
+            <span className="text-[13px] text-text-faint">{subtitle}</span>
           </div>
         </div>
 
