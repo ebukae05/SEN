@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from agents import active_dataset, get_active_dataframe, load_config
+from api.alert_routes import router as alert_router
 from api.auth import verify_api_key
 from api.ingestion_routes import router as ingestion_router
 from crews.maintenance_crew import run_pipeline
@@ -77,6 +78,7 @@ def _build_app() -> FastAPI:
 
 app = _build_app()
 app.include_router(ingestion_router)
+app.include_router(alert_router)
 
 
 def _resolve_dataframe(dataset_id: str | None):
@@ -105,6 +107,9 @@ def root() -> dict[str, object]:
             "ingest_delete": "DELETE /ingest/dataset/{id}",
             "ingest_stream": "POST /ingest/stream/{dataset_id}",
             "ingest_stream_latest": "GET /ingest/stream/{dataset_id}/{unit_id}/latest",
+            "alerts_recent": "GET /alerts/recent",
+            "alerts_test": "POST /alerts/test",
+            "alerts_sinks": "GET /alerts/sinks",
         },
     }
 

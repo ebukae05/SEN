@@ -184,6 +184,18 @@ security:
     - /openapi.json
     - /redoc
 
+alerts:
+  enabled: true
+  # Severities that trigger a webhook on transition. Anything not listed here
+  # only updates the in-memory log and the severity detector.
+  fire_on:
+    - critical
+  channels:
+    slack_webhook_env: SEN_SLACK_WEBHOOK
+    generic_webhook_env: SEN_ALERT_WEBHOOK
+  cooldown_seconds: 300
+  recent_log_capacity: 100
+
 logging:
   level: INFO
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

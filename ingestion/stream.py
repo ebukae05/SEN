@@ -19,6 +19,7 @@ from typing import Mapping
 import pandas as pd
 
 from agents import load_config
+from ingestion.alerts import maybe_dispatch
 from ingestion.heuristic import HeuristicStatus, compute_engine_status
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,14 @@ def append_reading(
         df = pd.DataFrame(rows)
         df.insert(0, "unit_id", unit_id)
         status = compute_engine_status(df, unit_id)
+        maybe_dispatch(
+            dataset_id=dataset_id,
+            unit_id=unit_id,
+            cycle=cycle,
+            severity=status.severity,
+            predicted_rul=status.predicted_rul,
+            threshold=status.threshold,
+        )
     return StreamSnapshot(
         dataset_id=dataset_id,
         unit_id=unit_id,
